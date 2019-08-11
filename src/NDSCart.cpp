@@ -25,6 +25,7 @@
 #include "Platform.h"
 
 #ifdef __LIBRETRO__
+#include "streams/file_stream_transforms.h"
 #include "streams/memory_stream.h"
 #include "romlist.h"
 #endif
@@ -883,10 +884,10 @@ bool ReadROMParams(u32 gamecode, u32* params)
 }
 
 #ifdef __LIBRETRO__
-#undef fclose
-#undef fread
-#undef fseek
-#undef ftell
+#define fclose rfclose
+#define fread rfread
+#define fseek rfseek
+#define ftell rftell
 #endif
 
 bool LoadROM(const char* path, const char* sram, bool direct)
