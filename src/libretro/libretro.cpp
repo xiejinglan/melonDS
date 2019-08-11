@@ -53,6 +53,7 @@
 #include "SPU.h"
 #include "libretro.h"
 #include <streams/file_stream.h>
+#include <streams/file_stream_transforms.h>
 #include <streams/memory_stream.h>
 #include <file/file_path.h>
 
@@ -133,9 +134,9 @@ static TouchMode current_touch_mode = TouchMode::Disabled;
 
 static struct retro_log_callback logging;
 static retro_log_printf_t log_cb;
-char retro_base_directory[4096];
-char retro_saves_directory[4096];
-bool retro_firmware_status;
+static char retro_base_directory[4096];
+static char retro_saves_directory[4096];
+bool retro_firmware_status = true;
 
 std::string game_path;
 std::string save_path;
@@ -208,7 +209,11 @@ FILE* OpenFile(const char* path, const char* mode, bool mustexist)
     if (mustexist)
     {
         ret = fopen(path, "rb");
-        if (ret) ret = freopen(path, mode, ret);
+        if (ret)
+        {
+           fclose(ret);
+           ret = fopen(path, mode);
+        }
     }
     else
         ret = fopen(path, mode);
@@ -218,74 +223,9 @@ FILE* OpenFile(const char* path, const char* mode, bool mustexist)
 
    FILE* OpenLocalFile(const char* path, const char* mode)
    {
-      bool relpath = false;
-      int pathlen = strlen(path);
-
-   #ifdef __WIN32__
-      if (pathlen > 3)
-      {
-         if (path[1] == ':' && path[2] == '\\')
-               return OpenFile(path, mode);
-      }
-   #else
-      if (pathlen > 1)
-      {
-         if (path[0] == '/')
-               return OpenFile(path, mode);
-      }
-   #endif
-
-      if (pathlen >= 3)
-      {
-         if (path[0] == '.' && path[1] == '.' && (path[2] == '/' || path[2] == '\\'))
-               relpath = true;
-      }
-
-      int emudirlen = strlen(retro_base_directory);
-      char* emudirpath;
-      if (emudirlen)
-      {
-         int len = emudirlen + 1 + pathlen + 1;
-         emudirpath = new char[len];
-         strncpy(&emudirpath[0], retro_base_directory, emudirlen - 1);
-         emudirpath[emudirlen] = '/';
-         strncpy(&emudirpath[emudirlen+1], path, pathlen - 1);
-         emudirpath[emudirlen+1+pathlen] = '\0';
-      }
-      else
-      {
-         emudirpath = new char[pathlen+1];
-         strncpy(&emudirpath[0], path, pathlen - 1);
-         emudirpath[pathlen] = '\0';
-      }
-
-      // Locations are application directory, and AppData/melonDS on Windows or XDG_CONFIG_HOME/melonds on Linux
-
-      FILE* f;
-
-      // First check current working directory
-      f = OpenFile(path, mode, true);
-      if (f) { delete[] emudirpath; return f; }
-
-      // then emu directory
-      f = OpenFile(emudirpath, mode, true);
-      if (f) { delete[] emudirpath; return f; }
-
-      if (!relpath)
-      {
-         std::string fullpath = std::string(retro_base_directory) + "/" + path;
-         f = OpenFile(fullpath.c_str(), mode, true);
-         if (f) { delete[] emudirpath; return f; }
-      }
-
-      if (mode[0] != 'r')
-      {
-         f = OpenFile(emudirpath, mode);
-         if (f) { delete[] emudirpath; return f; }
-      }
-
-      delete[] emudirpath;
-      return NULL;
+      std::string fullpath = std::string(retro_base_directory) + std::string(1, platformDirSeparator) + std::string(path);
+      FILE* f = OpenFile(fullpath.c_str(), mode, true);
+      return f;
    }
 
    void StopEmu()

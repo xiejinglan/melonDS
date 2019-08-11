@@ -28,7 +28,6 @@
 #include "boolean.h"
 #include <streams/file_stream_transforms.h>
 
-extern char retro_base_directory[4096];
 extern bool retro_firmware_status;
 #endif
 
@@ -99,13 +98,9 @@ void Reset()
     if (Firmware) delete[] Firmware;
     Firmware = NULL;
 
-#ifdef __LIBRETRO__
-    char path[2047];
-    sprintf(path, "%s%cfirmware.bin", retro_base_directory, platformDirSeparator);
-    FILE* f = fopen(path, "rb");
-    f ? retro_firmware_status &= true : retro_firmware_status &= false;
-#else
     FILE* f = Platform::OpenLocalFile("firmware.bin", "rb");
+#ifdef __LIBRETRO__
+    f ? retro_firmware_status &= true : retro_firmware_status &= false;
 #endif
     if (!f)
     {
@@ -144,16 +139,12 @@ void Reset()
     fclose(f);
 
     // take a backup
-#ifdef __LIBRETRO__
-	sprintf(path, "%s%cfirmware.bin.bak", retro_base_directory, platformDirSeparator);
-#else
-	sprintf(path, "firmware.bin.bak");
-#endif
-    f = fopen(path, "rb");
+    const char* firmbkp = "firmware.bin.bak";
+    f = Platform::OpenLocalFile(firmbkp, "rb");
     if (f) fclose(f);
     else
     {
-        f = fopen(path, "wb");
+        f = Platform::OpenLocalFile(firmbkp, "wb");
         fwrite(Firmware, 1, FirmwareLength, f);
         fclose(f);
     }
@@ -344,7 +335,7 @@ void Write(u8 val, u32 hold)
 
     if (!hold && (CurCmd == 0x02 || CurCmd == 0x0A))
     {
-        FILE* f = fopen("firmware.bin", "r+b");
+        FILE* f = Platform::OpenLocalFile("firmware.bin", "r+b");
         if (f)
         {
             u32 cutoff = 0x7FA00 & FirmwareMask;

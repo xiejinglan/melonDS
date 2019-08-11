@@ -39,9 +39,6 @@ char platformDirSeparator = '/';
 
 #ifdef __LIBRETRO__
 #include <streams/file_stream_transforms.h>
-
-extern char retro_base_directory[4096];
-extern char retro_game_path[4096];
 extern bool retro_firmware_status;
 #endif
 
@@ -398,16 +395,9 @@ void Reset()
     FILE* f;
     u32 i;
 
-#ifdef __LIBRETRO__
-    char path[2048];
-    sprintf(path, "%s%cbios9.bin", retro_base_directory, platformDirSeparator);
-    f = fopen(path, "rb");
-    if (f)
-       retro_firmware_status = true;
-    else
-       retro_firmware_status = false;
-#else
     f = Platform::OpenLocalFile("bios9.bin", "rb");
+#ifdef __LIBRETRO__
+    f ? retro_firmware_status &= true : retro_firmware_status &= false;
 #endif
     LastSysClockCycles = 0;
     if (!f)
@@ -426,15 +416,9 @@ void Reset()
         fclose(f);
     }
 
-#ifdef __LIBRETRO__
-    sprintf(path, "%s%cbios7.bin", retro_base_directory, platformDirSeparator);
-    f = fopen(path, "rb");
-    if (f)
-       retro_firmware_status = true;
-    else
-       retro_firmware_status = false;
-#else
     f = Platform::OpenLocalFile("bios7.bin", "rb");
+#ifdef __LIBRETRO__
+    f ? retro_firmware_status &= true : retro_firmware_status &= false;
 #endif
 
     if (!f)
