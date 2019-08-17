@@ -313,7 +313,7 @@ PSS_STYLE :=2
 LDFLAGS += -DLL
 LIBS = ws2_32.lib winmm.lib
 else
-   CC = gcc
+   CC ?= gcc
    TARGET := $(TARGET_NAME)_libretro.dll
    SHARED := -shared -static-libgcc -static-libstdc++ -s -Wl,--version-script=$(CORE_DIR)/link.T -Wl,--no-undefined
    LDFLAGS += -lws2_32 -lwinmm
