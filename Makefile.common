@@ -48,7 +48,7 @@ SOURCES_C += $(CORE_DIR)/libretro-common/glsm/glsm.c \
 SOURCES_CXX += $(MELON_DIR)/GPU3D_OpenGL.cpp \
                $(MELON_DIR)/OpenGLSupport.cpp
 
-DEFINES += -DHAVE_OPENGL
+DEFINES += -DHAVE_OPENGL -DCORE
 endif
 
 ifeq ($(HAVE_THREADS), 1)
