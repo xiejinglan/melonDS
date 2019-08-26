@@ -224,7 +224,7 @@ FILE* OpenFile(const char* path, const char* mode, bool mustexist)
    FILE* OpenLocalFile(const char* path, const char* mode)
    {
       std::string fullpath = std::string(retro_base_directory) + std::string(1, platformDirSeparator) + std::string(path);
-      FILE* f = OpenFile(fullpath.c_str(), mode, true);
+      FILE* f = OpenFile(fullpath.c_str(), mode, mode[0] != 'w');
       return f;
    }
 
