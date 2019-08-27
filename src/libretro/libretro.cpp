@@ -619,8 +619,6 @@ bool initialize_opengl(void)
    glsm_ctx_params_t params = {0};
 
    params.context_type     = RETRO_HW_CONTEXT_OPENGL;
-   params.major            = 3;
-   params.minor            = 3;
    params.context_reset    = context_reset;
    params.context_destroy  = context_destroy;
    params.environ_cb       = environ_cb;
@@ -1147,7 +1145,7 @@ void retro_run(void)
       video_cb(RETRO_HW_FRAME_BUFFER_VALID, screen_layout_data.buffer_width, screen_layout_data.buffer_height, 0);
 #endif
    }
-   else
+   else if(!Config::_3DRenderer)
    {
       if(screen_layout_data.enable_top_screen)
          copy_screen(&screen_layout_data, GPU::Framebuffer[frontbuf][0], screen_layout_data.top_screen_offset);
