@@ -209,11 +209,8 @@ FILE* OpenFile(const char* path, const char* mode, bool mustexist)
     if (mustexist)
     {
         ret = fopen(path, "rb");
-        if (ret)
-        {
-           fclose(ret);
-           ret = fopen(path, mode);
-        }
+        if (ret) fclose(ret);
+        ret = fopen(path, mode);
     }
     else
         ret = fopen(path, mode);
@@ -224,7 +221,7 @@ FILE* OpenFile(const char* path, const char* mode, bool mustexist)
    FILE* OpenLocalFile(const char* path, const char* mode)
    {
       std::string fullpath = std::string(retro_base_directory) + std::string(1, platformDirSeparator) + std::string(path);
-      FILE* f = OpenFile(fullpath.c_str(), mode, mode[0] != 'w');
+      FILE* f = OpenFile(fullpath.c_str(), mode, true);
       return f;
    }
 
