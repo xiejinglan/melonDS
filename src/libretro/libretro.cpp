@@ -71,6 +71,8 @@ static bool initialized_opengl = false; // if the opengl context has initialized
 static bool using_opengl = false; // if the opengl renderer is currently used
 static bool update_opengl = true; // update the ubo / vao
 
+static bool holding_noise_btn = false;
+
 enum CurrentRenderer
 {
    None,
@@ -769,6 +771,8 @@ static void update_input(void)
       }
    }
 
+   holding_noise_btn = !!input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L2);
+
    if(current_screen_layout != ScreenLayout::TopOnly)
    {
       switch(current_touch_mode)
@@ -1003,6 +1007,18 @@ void retro_run(void)
    }
 
    update_input();
+
+   if(holding_noise_btn)
+   {
+      s16 tmp[735];
+      for (int i = 0; i < 735; i++) tmp[i] = rand() & 0xFFFF;
+      NDS::MicInputFrame(tmp, 735);
+   }
+   else
+   {
+      NDS::MicInputFrame(NULL, 0);
+   }
+
 #ifdef HAVE_OPENGL
    if(using_opengl)
       glsm_ctl(GLSM_CTL_STATE_BIND, NULL);
@@ -1217,6 +1233,7 @@ bool retro_load_game(const struct retro_game_info *info)
       { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L, "L" },
       { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_X, "X" },
       { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_Y, "Y" },
+      { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L2, "Make microphone noise" },
       { 0 },
    };
 
