@@ -2207,8 +2207,6 @@ void GPU2D::DrawSprites(u32 line)
         64, 32, 64, 8
     };
 
-    u32 nsprites = 0;
-
     for (int bgnum = 0x0C00; bgnum >= 0x0000; bgnum -= 0x0400)
     {
         for (int sprnum = 127; sprnum >= 0; sprnum--)
