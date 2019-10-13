@@ -24,5 +24,5 @@ add_custom_command(OUTPUT control.nacp
                    COMMAND ${NACPTOOL} --create "melonDS switch fast alpha" "Arisotura, RSDuck, Hydr8gon" "0.1" ${CMAKE_BINARY_DIR}/control.nacp)
 
 add_custom_target(melonDS.nro ALL
-    ${ELF2NRO} ${CMAKE_BINARY_DIR}/melonDS.elf ${CMAKE_BINARY_DIR}/melonDS.nro --nacp=${CMAKE_BINARY_DIR}/control.nacp
+    ${ELF2NRO} ${CMAKE_BINARY_DIR}/melonDS.elf ${CMAKE_BINARY_DIR}/melonDS.nro --icon=${CMAKE_BINARY_DIR}/../icon/melon.jpg --nacp=${CMAKE_BINARY_DIR}/control.nacp
     DEPENDS melonDS.elf control.nacp)
