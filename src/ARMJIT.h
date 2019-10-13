@@ -58,6 +58,8 @@ inline JitBlockEntry LookUpBlock(u32 addr)
 	return FastBlockAccess[TranslateAddr<num>(addr) / 2];
 }
 
+void RebuiltFastMem9(ARMv5* cpu, u32 start, u32 end);
+
 void Init();
 void DeInit();
 

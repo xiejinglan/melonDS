@@ -238,10 +238,14 @@ public:
 
     u32 DTCMSetting, ITCMSetting;
 
-    u8 ITCM[0x8000];
+    // those need to come in memory first
+    // so we can address them with a 12 bit immediate offset
     u32 ITCMSize;
-    u8 DTCM[0x4000];
     u32 DTCMBase, DTCMSize;
+    s32 RegionCodeCycles;
+
+    u8 ITCM[0x8000];
+    u8 DTCM[0x4000];
 
     u8 ICache[0x2000];
     u32 ICacheTags[64*4];
@@ -266,7 +270,6 @@ public:
     // code/16N/32N/32S
     u8 MemTimings[0x100000][4];
 
-    s32 RegionCodeCycles;
     u8* CurICacheLine;
 };
 

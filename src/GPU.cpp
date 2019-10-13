@@ -20,6 +20,8 @@
 #include <string.h>
 #include "NDS.h"
 #include "GPU.h"
+#include "switch/profiler.h"
+#include "switch/custom_counter.h"
 u64 vbltime;
 
 namespace GPU
@@ -39,6 +41,9 @@ u16 DispStat[2], VMatch[2];
 
 u8 Palette[2*1024];
 u8 OAM[2*1024];
+
+u8 VRAMFlat_ABG[512*1024];
+u8 VRAMFlat_BBG[128*1024];
 
 u8 VRAM_A[128*1024];
 u8 VRAM_B[128*1024];
@@ -875,8 +880,12 @@ void StartHBlank(u32 line)
         // sprites are pre-rendered one scanline in advance
         if (line < 191)
         {
+            PROFILER_SECTION(drawSprites)
+
             GPU2D_A->DrawSprites(line+1);
             GPU2D_B->DrawSprites(line+1);
+
+            PROFILER_END_SECTION
         }
 
         NDS::CheckDMAs(0, 0x02);
@@ -989,7 +998,9 @@ void StartScanline(u32 line)
         }
         else if (VCount == 144)
         {
+            PROFILER_SECTION(gpu3dvcount144)
             GPU3D::VCount144();
+            PROFILER_END_SECTION
         }
     }
 

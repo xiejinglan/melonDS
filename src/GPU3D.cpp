@@ -24,6 +24,10 @@
 #include "FIFO.h"
 #include "Config.h"
 
+#include <arm_neon.h>
+#include "switch/custom_counter.h"
+
+#include "switch/profiler.h"
 
 // 3D engine notes
 //
@@ -677,82 +681,174 @@ void MatrixLoad4x3(s32* m, s32* s)
 
 void MatrixMult4x4(s32* m, s32* s)
 {
-    s32 tmp[16];
-    memcpy(tmp, m, 16*4);
+    PROFILER_SECTION(mulmat4x4)
+    __asm__ volatile
+    (
+        "ld1 {v0.4s, v1.4s, v2.4s, v3.4s}, [%[m]]\n"
+        "ld1 {v4.4s, v5.4s, v6.4s, v7.4s}, [%[s]]\n"
 
-    // m = s*m
-    m[0] = ((s64)s[0]*tmp[0] + (s64)s[1]*tmp[4] + (s64)s[2]*tmp[8] + (s64)s[3]*tmp[12]) >> 12;
-    m[1] = ((s64)s[0]*tmp[1] + (s64)s[1]*tmp[5] + (s64)s[2]*tmp[9] + (s64)s[3]*tmp[13]) >> 12;
-    m[2] = ((s64)s[0]*tmp[2] + (s64)s[1]*tmp[6] + (s64)s[2]*tmp[10] + (s64)s[3]*tmp[14]) >> 12;
-    m[3] = ((s64)s[0]*tmp[3] + (s64)s[1]*tmp[7] + (s64)s[2]*tmp[11] + (s64)s[3]*tmp[15]) >> 12;
+        "smull v16.2d, v0.2s, v4.4s[0]\n"
+        "smull2 v17.2d, v0.4s, v4.4s[0]\n"
+        "smull v18.2d, v0.2s, v5.4s[0]\n"
+        "smull2 v19.2d, v0.4s, v5.4s[0]\n"
+        "smull v20.2d, v0.2s, v6.4s[0]\n"
+        "smull2 v21.2d, v0.4s, v6.4s[0]\n"
+        "smull v22.2d, v0.2s, v7.4s[0]\n"
+        "smull2 v23.2d, v0.4s, v7.4s[0]\n"
 
-    m[4] = ((s64)s[4]*tmp[0] + (s64)s[5]*tmp[4] + (s64)s[6]*tmp[8] + (s64)s[7]*tmp[12]) >> 12;
-    m[5] = ((s64)s[4]*tmp[1] + (s64)s[5]*tmp[5] + (s64)s[6]*tmp[9] + (s64)s[7]*tmp[13]) >> 12;
-    m[6] = ((s64)s[4]*tmp[2] + (s64)s[5]*tmp[6] + (s64)s[6]*tmp[10] + (s64)s[7]*tmp[14]) >> 12;
-    m[7] = ((s64)s[4]*tmp[3] + (s64)s[5]*tmp[7] + (s64)s[6]*tmp[11] + (s64)s[7]*tmp[15]) >> 12;
+        "smlal v16.2d, v1.2s, v4.4s[1]\n"
+        "smlal2 v17.2d, v1.4s, v4.4s[1]\n"
+        "smlal v18.2d, v1.2s, v5.4s[1]\n"
+        "smlal2 v19.2d, v1.4s, v5.4s[1]\n"
+        "smlal v20.2d, v1.2s, v6.4s[1]\n"
+        "smlal2 v21.2d, v1.4s, v6.4s[1]\n"
+        "smlal v22.2d, v1.2s, v7.4s[1]\n"
+        "smlal2 v23.2d, v1.4s, v7.4s[1]\n"
 
-    m[8] = ((s64)s[8]*tmp[0] + (s64)s[9]*tmp[4] + (s64)s[10]*tmp[8] + (s64)s[11]*tmp[12]) >> 12;
-    m[9] = ((s64)s[8]*tmp[1] + (s64)s[9]*tmp[5] + (s64)s[10]*tmp[9] + (s64)s[11]*tmp[13]) >> 12;
-    m[10] = ((s64)s[8]*tmp[2] + (s64)s[9]*tmp[6] + (s64)s[10]*tmp[10] + (s64)s[11]*tmp[14]) >> 12;
-    m[11] = ((s64)s[8]*tmp[3] + (s64)s[9]*tmp[7] + (s64)s[10]*tmp[11] + (s64)s[11]*tmp[15]) >> 12;
+        "smlal v16.2d, v2.2s, v4.4s[2]\n"
+        "smlal2 v17.2d, v2.4s, v4.4s[2]\n"
+        "smlal v18.2d, v2.2s, v5.4s[2]\n"
+        "smlal2 v19.2d, v2.4s, v5.4s[2]\n"
+        "smlal v20.2d, v2.2s, v6.4s[2]\n"
+        "smlal2 v21.2d, v2.4s, v6.4s[2]\n"
+        "smlal v22.2d, v2.2s, v7.4s[2]\n"
+        "smlal2 v23.2d, v2.4s, v7.4s[2]\n"
 
-    m[12] = ((s64)s[12]*tmp[0] + (s64)s[13]*tmp[4] + (s64)s[14]*tmp[8] + (s64)s[15]*tmp[12]) >> 12;
-    m[13] = ((s64)s[12]*tmp[1] + (s64)s[13]*tmp[5] + (s64)s[14]*tmp[9] + (s64)s[15]*tmp[13]) >> 12;
-    m[14] = ((s64)s[12]*tmp[2] + (s64)s[13]*tmp[6] + (s64)s[14]*tmp[10] + (s64)s[15]*tmp[14]) >> 12;
-    m[15] = ((s64)s[12]*tmp[3] + (s64)s[13]*tmp[7] + (s64)s[14]*tmp[11] + (s64)s[15]*tmp[15]) >> 12;
+        "smlal v16.2d, v3.2s, v4.4s[3]\n"
+        "smlal2 v17.2d, v3.4s, v4.4s[3]\n"
+        "smlal v18.2d, v3.2s, v5.4s[3]\n"
+        "smlal2 v19.2d, v3.4s, v5.4s[3]\n"
+        "smlal v20.2d, v3.2s, v6.4s[3]\n"
+        "smlal2 v21.2d, v3.4s, v6.4s[3]\n"
+        "smlal v22.2d, v3.2s, v7.4s[3]\n"
+        "smlal2 v23.2d, v3.4s, v7.4s[3]\n"
+
+        "shrn v0.2s, v16.2d, #12\n"
+        "shrn v1.2s, v18.2d, #12\n"
+        "shrn v2.2s, v20.2d, #12\n"
+        "shrn v3.2s, v22.2d, #12\n"
+        "shrn2 v0.4s, v17.2d, #12\n"
+        "shrn2 v1.4s, v19.2d, #12\n"
+        "shrn2 v2.4s, v21.2d, #12\n"
+        "shrn2 v3.4s, v23.2d, #12\n"
+
+        "st1 {v0.4s, v1.4s, v2.4s, v3.4s}, [%[m]]\n"
+        :
+        : [m] "r" (m), [s] "r" (s)
+        : "q0", "q1", "q2", "q3", "q4", "q5", "q6", "q7", "q16", "q17", "q18", "q19", "q20", "q21", "q22", "q23",
+            "memory"
+    );
+    PROFILER_END_SECTION
 }
 
 void MatrixMult4x3(s32* m, s32* s)
 {
-    s32 tmp[16];
-    memcpy(tmp, m, 16*4);
+    PROFILER_SECTION(mulmat4x3)
+    __asm__ volatile
+    (
+        "ld1 {v0.4s, v1.4s, v2.4s, v3.4s}, [%[m]]\n"
+        "ld1 {v4.4s, v5.4s, v6.4s}, [%[s]]\n"
+        // we could also use shifting for this one
+        // but the combined latency of shift + add, is comparable to smlal
+        "dup v7.4s, %w[c]\n"
 
-    // m = s*m
-    m[0] = ((s64)s[0]*tmp[0] + (s64)s[1]*tmp[4] + (s64)s[2]*tmp[8]) >> 12;
-    m[1] = ((s64)s[0]*tmp[1] + (s64)s[1]*tmp[5] + (s64)s[2]*tmp[9]) >> 12;
-    m[2] = ((s64)s[0]*tmp[2] + (s64)s[1]*tmp[6] + (s64)s[2]*tmp[10]) >> 12;
-    m[3] = ((s64)s[0]*tmp[3] + (s64)s[1]*tmp[7] + (s64)s[2]*tmp[11]) >> 12;
+        "smull v16.2d, v0.2s, v4.4s[0]\n"
+        "smull2 v17.2d, v0.4s, v4.4s[0]\n"
+        "smull v18.2d, v0.2s, v4.4s[3]\n"
+        "smull2 v19.2d, v0.4s, v4.4s[3]\n"
+        "smull v20.2d, v0.2s, v5.4s[2]\n"
+        "smull2 v21.2d, v0.4s, v5.4s[2]\n"
+        "smull v22.2d, v0.2s, v6.4s[1]\n"
+        "smull2 v23.2d, v0.4s, v6.4s[1]\n"
 
-    m[4] = ((s64)s[3]*tmp[0] + (s64)s[4]*tmp[4] + (s64)s[5]*tmp[8]) >> 12;
-    m[5] = ((s64)s[3]*tmp[1] + (s64)s[4]*tmp[5] + (s64)s[5]*tmp[9]) >> 12;
-    m[6] = ((s64)s[3]*tmp[2] + (s64)s[4]*tmp[6] + (s64)s[5]*tmp[10]) >> 12;
-    m[7] = ((s64)s[3]*tmp[3] + (s64)s[4]*tmp[7] + (s64)s[5]*tmp[11]) >> 12;
+        "smlal v16.2d, v1.2s, v4.4s[1]\n"
+        "smlal2 v17.2d, v1.4s, v4.4s[1]\n"
+        "smlal v18.2d, v1.2s, v5.4s[0]\n"
+        "smlal2 v19.2d, v1.4s, v5.4s[0]\n"
+        "smlal v20.2d, v1.2s, v5.4s[3]\n"
+        "smlal2 v21.2d, v1.4s, v5.4s[3]\n"
+        "smlal v22.2d, v1.2s, v6.4s[2]\n"
+        "smlal2 v23.2d, v1.4s, v6.4s[2]\n"
 
-    m[8] = ((s64)s[6]*tmp[0] + (s64)s[7]*tmp[4] + (s64)s[8]*tmp[8]) >> 12;
-    m[9] = ((s64)s[6]*tmp[1] + (s64)s[7]*tmp[5] + (s64)s[8]*tmp[9]) >> 12;
-    m[10] = ((s64)s[6]*tmp[2] + (s64)s[7]*tmp[6] + (s64)s[8]*tmp[10]) >> 12;
-    m[11] = ((s64)s[6]*tmp[3] + (s64)s[7]*tmp[7] + (s64)s[8]*tmp[11]) >> 12;
+        "smlal v16.2d, v2.2s, v4.4s[2]\n"
+        "smlal2 v17.2d, v2.4s, v4.4s[2]\n"
+        "smlal v18.2d, v2.2s, v5.4s[1]\n"
+        "smlal2 v19.2d, v2.4s, v5.4s[1]\n"
+        "smlal v20.2d, v2.2s, v6.4s[0]\n"
+        "smlal2 v21.2d, v2.4s, v6.4s[0]\n"
+        "smlal v22.2d, v2.2s, v6.4s[3]\n"
+        "smlal2 v23.2d, v2.4s, v6.4s[3]\n"
 
-    m[12] = ((s64)s[9]*tmp[0] + (s64)s[10]*tmp[4] + (s64)s[11]*tmp[8] + (s64)0x1000*tmp[12]) >> 12;
-    m[13] = ((s64)s[9]*tmp[1] + (s64)s[10]*tmp[5] + (s64)s[11]*tmp[9] + (s64)0x1000*tmp[13]) >> 12;
-    m[14] = ((s64)s[9]*tmp[2] + (s64)s[10]*tmp[6] + (s64)s[11]*tmp[10] + (s64)0x1000*tmp[14]) >> 12;
-    m[15] = ((s64)s[9]*tmp[3] + (s64)s[10]*tmp[7] + (s64)s[11]*tmp[11] + (s64)0x1000*tmp[15]) >> 12;
+        "smlal v22.2d, v3.2s, v7.4s[0]\n"
+        "smlal2 v23.2d, v3.4s, v7.4s[0]\n"
+
+        "shrn v0.2s, v16.2d, #12\n"
+        "shrn v1.2s, v18.2d, #12\n"
+        "shrn v2.2s, v20.2d, #12\n"
+        "shrn v3.2s, v22.2d, #12\n"
+        "shrn2 v0.4s, v17.2d, #12\n"
+        "shrn2 v1.4s, v19.2d, #12\n"
+        "shrn2 v2.4s, v21.2d, #12\n"
+        "shrn2 v3.4s, v23.2d, #12\n"
+
+        "st1 {v0.4s, v1.4s, v2.4s, v3.4s}, [%[m]]\n"
+        :
+        : [m] "r" (m), [s] "r" (s), [c] "r" (0x1000)
+        : "q0", "q1", "q2", "q3", "q4", "q5", "q6", "q7", "q16", "q17", "q18", "q19", "q20", "q21", "q22", "q23",
+            "memory"
+    );
+    PROFILER_END_SECTION
 }
 
 void MatrixMult3x3(s32* m, s32* s)
 {
-    s32 tmp[12];
-    memcpy(tmp, m, 12*4);
+    PROFILER_SECTION(mulmat3x3)
+    // assumes s has a length of atleast 16
+    __asm__ volatile
+    (
+        "ld1 {v0.4s, v1.4s, v2.4s}, [%[m]]\n"
+        "ld1 {v3.4s, v4.4s, v5.4s}, [%[s]]\n"
 
-    // m = s*m
-    m[0] = ((s64)s[0]*tmp[0] + (s64)s[1]*tmp[4] + (s64)s[2]*tmp[8]) >> 12;
-    m[1] = ((s64)s[0]*tmp[1] + (s64)s[1]*tmp[5] + (s64)s[2]*tmp[9]) >> 12;
-    m[2] = ((s64)s[0]*tmp[2] + (s64)s[1]*tmp[6] + (s64)s[2]*tmp[10]) >> 12;
-    m[3] = ((s64)s[0]*tmp[3] + (s64)s[1]*tmp[7] + (s64)s[2]*tmp[11]) >> 12;
+        "smull v6.2d, v0.2s, v3.4s[0]\n"
+        "smull2 v7.2d, v0.4s, v3.4s[0]\n"
+        "smull v16.2d, v0.2s, v3.4s[3]\n"
+        "smull2 v17.2d, v0.4s, v3.4s[3]\n"
+        "smull v18.2d, v0.2s, v4.4s[2]\n"
+        "smull2 v19.2d, v0.4s, v4.4s[2]\n"
 
-    m[4] = ((s64)s[3]*tmp[0] + (s64)s[4]*tmp[4] + (s64)s[5]*tmp[8]) >> 12;
-    m[5] = ((s64)s[3]*tmp[1] + (s64)s[4]*tmp[5] + (s64)s[5]*tmp[9]) >> 12;
-    m[6] = ((s64)s[3]*tmp[2] + (s64)s[4]*tmp[6] + (s64)s[5]*tmp[10]) >> 12;
-    m[7] = ((s64)s[3]*tmp[3] + (s64)s[4]*tmp[7] + (s64)s[5]*tmp[11]) >> 12;
+        "smlal v6.2d, v1.2s, v3.4s[1]\n"
+        "smlal2 v7.2d, v1.4s, v3.4s[1]\n"
+        "smlal v16.2d, v1.2s, v4.4s[0]\n"
+        "smlal2 v17.2d, v1.4s, v4.4s[0]\n"
+        "smlal v18.2d, v1.2s, v4.4s[3]\n"
+        "smlal2 v19.2d, v1.4s, v4.4s[3]\n"
 
-    m[8] = ((s64)s[6]*tmp[0] + (s64)s[7]*tmp[4] + (s64)s[8]*tmp[8]) >> 12;
-    m[9] = ((s64)s[6]*tmp[1] + (s64)s[7]*tmp[5] + (s64)s[8]*tmp[9]) >> 12;
-    m[10] = ((s64)s[6]*tmp[2] + (s64)s[7]*tmp[6] + (s64)s[8]*tmp[10]) >> 12;
-    m[11] = ((s64)s[6]*tmp[3] + (s64)s[7]*tmp[7] + (s64)s[8]*tmp[11]) >> 12;
+        "smlal v6.2d, v2.2s, v3.4s[2]\n"
+        "smlal2 v7.2d, v2.4s, v3.4s[2]\n"
+        "smlal v16.2d, v2.2s, v4.4s[1]\n"
+        "smlal2 v17.2d, v2.4s, v4.4s[1]\n"
+        "smlal v18.2d, v2.2s, v5.4s[0]\n"
+        "smlal2 v19.2d, v2.4s, v5.4s[0]\n"
+
+        "shrn v0.2s, v6.2d, #12\n"
+        "shrn v1.2s, v16.2d, #12\n"
+        "shrn v2.2s, v18.2d, #12\n"
+        "shrn2 v0.4s, v7.2d, #12\n"
+        "shrn2 v1.4s, v17.2d, #12\n"
+        "shrn2 v2.4s, v19.2d, #12\n"
+
+        "st1 {v0.4s, v1.4s, v2.4s}, [%[m]]\n"
+        :
+        : [m] "r" (m), [s] "r" (s)
+        : "q0", "q1", "q2", "q3", "q4", "q5", "q6", "q7", "q16", "q17", "q18", "q19", "memory"
+    );
+    PROFILER_END_SECTION
 }
 
 void MatrixScale(s32* m, s32* s)
 {
+    PROFILER_SECTION(matscale)
+
     m[0] = ((s64)s[0]*m[0]) >> 12;
     m[1] = ((s64)s[0]*m[1]) >> 12;
     m[2] = ((s64)s[0]*m[2]) >> 12;
@@ -767,14 +863,18 @@ void MatrixScale(s32* m, s32* s)
     m[9] = ((s64)s[2]*m[9]) >> 12;
     m[10] = ((s64)s[2]*m[10]) >> 12;
     m[11] = ((s64)s[2]*m[11]) >> 12;
+
+    PROFILER_END_SECTION
 }
 
 void MatrixTranslate(s32* m, s32* s)
 {
+    PROFILER_SECTION(matTranslate)
     m[12] += ((s64)s[0]*m[0] + (s64)s[1]*m[4] + (s64)s[2]*m[8]) >> 12;
     m[13] += ((s64)s[0]*m[1] + (s64)s[1]*m[5] + (s64)s[2]*m[9]) >> 12;
     m[14] += ((s64)s[0]*m[2] + (s64)s[1]*m[6] + (s64)s[2]*m[10]) >> 12;
     m[15] += ((s64)s[0]*m[3] + (s64)s[1]*m[7] + (s64)s[2]*m[11]) >> 12;
+    PROFILER_END_SECTION
 }
 
 void UpdateClipMatrix()
@@ -821,6 +921,7 @@ void AddCycles(s32 num)
 
 void NextVertexSlot()
 {
+    PROFILER_SECTION(nextVertexSlot)
     s32 num = (9 - VertexSlotCounter) + 1;
 
     for (;;)
@@ -860,6 +961,7 @@ void NextVertexSlot()
             }
         }
     }
+    PROFILER_END_SECTION
 }
 
 void StallPolygonPipeline(s32 delay, s32 nonstalldelay)
@@ -1032,6 +1134,8 @@ bool ClipCoordsEqual(Vertex* a, Vertex* b)
 
 void SubmitPolygon()
 {
+    PROFILER_SECTION(submitPolygon1)
+
     Vertex clippedvertices[10];
     Vertex* reusedvertices[2];
     int clipstart = 0;
@@ -1085,6 +1189,7 @@ void SubmitPolygon()
         if (!(CurPolygonAttr & (1<<7)))
         {
             LastStripPolygon = NULL;
+            PROFILER_END_SECTION
             return;
         }
     }
@@ -1093,6 +1198,7 @@ void SubmitPolygon()
         if (!(CurPolygonAttr & (1<<6)))
         {
             LastStripPolygon = NULL;
+            PROFILER_END_SECTION
             return;
         }
     }
@@ -1146,6 +1252,10 @@ void SubmitPolygon()
 
     // detect lines, for the OpenGL renderer
 
+    PROFILER_END_SECTION
+
+    PROFILER_SECTION(clipping)
+
     int polytype = 0;
     if (nverts == 3)
     {
@@ -1167,8 +1277,12 @@ void SubmitPolygon()
     if (nverts == 0)
     {
         LastStripPolygon = NULL;
+        PROFILER_END_SECTION
         return;
     }
+
+    PROFILER_END_SECTION
+    PROFILER_SECTION(finialisePolygon)
 
     // build the actual polygon
 
@@ -1191,6 +1305,7 @@ void SubmitPolygon()
     {
         LastStripPolygon = NULL;
         DispCnt |= (1<<13);
+        PROFILER_END_SECTION
         return;
     }
 
@@ -1373,10 +1488,14 @@ void SubmitPolygon()
         LastStripPolygon = poly;
     else
         LastStripPolygon = NULL;
+
+    PROFILER_END_SECTION
 }
 
 void SubmitVertex()
 {
+    PROFILER_SECTION(submitVertex)
+
     s64 vertex[4] = {(s64)CurVertex[0], (s64)CurVertex[1], (s64)CurVertex[2], 0x1000};
     Vertex* vertextrans = &TempVertexBuffer[VertexNumInPoly];
 
@@ -1407,6 +1526,8 @@ void SubmitVertex()
 
     VertexNum++;
     VertexNumInPoly++;
+
+    PROFILER_END_SECTION
 
     switch (PolygonMode)
     {
@@ -1470,11 +1591,11 @@ void SubmitVertex()
     }
 
     VertexPipeline = 7;
-    AddCycles(3);
-}
+    AddCycles(3);}
 
 void CalculateLighting()
 {
+    PROFILER_SECTION(calcLighting)
     if ((TexParam >> 30) == 2)
     {
         TexCoords[0] = RawTexCoords[0] + (((s64)Normal[0]*TexMatrix[0] + (s64)Normal[1]*TexMatrix[4] + (s64)Normal[2]*TexMatrix[8]) >> 21);
@@ -1545,11 +1666,14 @@ void CalculateLighting()
     if (c < 1) c = 1;
     NormalPipeline = 7;
     AddCycles(c);
+
+    PROFILER_END_SECTION
 }
 
 
 void BoxTest(u32* params)
 {
+    PROFILER_SECTION(boxtest)
     Vertex cube[8];
     Vertex face[10];
     int res;
@@ -1596,6 +1720,7 @@ void BoxTest(u32* params)
     if (res > 0)
     {
         GXStat |= (1<<1);
+        PROFILER_END_SECTION
         return;
     }
 
@@ -1605,6 +1730,7 @@ void BoxTest(u32* params)
     if (res > 0)
     {
         GXStat |= (1<<1);
+        PROFILER_END_SECTION
         return;
     }
 
@@ -1614,6 +1740,7 @@ void BoxTest(u32* params)
     if (res > 0)
     {
         GXStat |= (1<<1);
+        PROFILER_END_SECTION
         return;
     }
 
@@ -1623,6 +1750,7 @@ void BoxTest(u32* params)
     if (res > 0)
     {
         GXStat |= (1<<1);
+        PROFILER_END_SECTION
         return;
     }
 
@@ -1632,12 +1760,14 @@ void BoxTest(u32* params)
     if (res > 0)
     {
         GXStat |= (1<<1);
+        PROFILER_END_SECTION
         return;
     }
 
     // top face (+Y)
     face[0] = cube[2]; face[1] = cube[3]; face[2] = cube[4]; face[3] = cube[7];
     res = ClipPolygon<false>(face, 4, 0);
+    PROFILER_END_SECTION
     if (res > 0)
     {
         GXStat |= (1<<1);
@@ -1647,6 +1777,7 @@ void BoxTest(u32* params)
 
 void PosTest()
 {
+    PROFILER_SECTION(postest)
     s64 vertex[4] = {(s64)CurVertex[0], (s64)CurVertex[1], (s64)CurVertex[2], 0x1000};
 
     UpdateClipMatrix();
@@ -1656,10 +1787,12 @@ void PosTest()
     PosTestResult[3] = (vertex[0]*ClipMatrix[3] + vertex[1]*ClipMatrix[7] + vertex[2]*ClipMatrix[11] + vertex[3]*ClipMatrix[15]) >> 12;
 
     AddCycles(5);
+    PROFILER_END_SECTION
 }
 
 void VecTest(u32* params)
 {
+    PROFILER_SECTION(vectest)
     // TODO: maybe it overwrites the normal registers, too
 
     s16 normal[3];
@@ -1677,6 +1810,7 @@ void VecTest(u32* params)
     if (VecTestResult[2] & 0x1000) VecTestResult[2] |= 0xF000;
 
     AddCycles(4);
+    PROFILER_END_SECTION
 }
 
 
@@ -1685,10 +1819,13 @@ void CmdFIFOWrite(CmdFIFOEntry& entry)
 {
     if (CmdFIFO->IsEmpty() && !CmdPIPE->IsFull())
     {
+        PROFILER_SECTION(cmdPipeNotFull)
         CmdPIPE->Write(entry);
+        PROFILER_END_SECTION
     }
     else
     {
+        PROFILER_SECTION(cmdFifoWrite)
         if (CmdFIFO->IsFull())
         {
             // store it to the stall queue. stall the system.
@@ -1697,10 +1834,12 @@ void CmdFIFOWrite(CmdFIFOEntry& entry)
 
             CmdStallQueue->Write(entry);
             NDS::GXFIFOStall();
+            PROFILER_END_SECTION
             return;
         }
 
         CmdFIFO->Write(entry);
+        PROFILER_END_SECTION
     }
 
     GXStat |= (1<<27);
@@ -1754,6 +1893,8 @@ CmdFIFOEntry CmdFIFORead()
 
 void ExecuteCommand()
 {
+    PROFILER_SECTION(executegpu3dcommands)
+
     CmdFIFOEntry entry = CmdFIFORead();
 
     //printf("FIFO: processing %02X %08X. Levels: FIFO=%d, PIPE=%d\n", entry.Command, entry.Param, CmdFIFO->Level(), CmdPIPE->Level());
@@ -2341,6 +2482,8 @@ void ExecuteCommand()
             break;
         }
     }
+
+    PROFILER_END_SECTION
 }
 
 s32 CyclesToRunFor()
@@ -2372,6 +2515,8 @@ void Run()
         return;
     }
 
+    PROFILER_SECTION(gpu3drun)
+
     s32 cycles = (NDS::ARM9Timestamp >> NDS::ARM9ClockShift) - Timestamp;
     CycleCount -= cycles;
     Timestamp = NDS::ARM9Timestamp >> NDS::ARM9ClockShift;
@@ -2395,6 +2540,8 @@ void Run()
         if (NumPushPopCommands == 0) GXStat &= ~(1<<14);
         if (NumTestCommands == 0)    GXStat &= ~(1<<0);
     }
+
+    PROFILER_END_SECTION
 }
 
 

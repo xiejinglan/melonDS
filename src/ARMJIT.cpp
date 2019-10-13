@@ -6,7 +6,12 @@
 #include "Config.h"
 
 #include "ARMJIT_Internal.h"
+
+#if defined(__x86_64__)
 #include "ARMJIT_x64/ARMJIT_Compiler.h"
+#elif defined(__aarch64__)
+#include "ARMJIT_A64/ARMJIT_Compiler.h"
+#endif
 
 #include "ARMInterpreter_ALU.h"
 #include "ARMInterpreter_LoadStore.h"
@@ -16,10 +21,12 @@
 #include "GPU3D.h"
 #include "SPU.h"
 #include "Wifi.h"
+#include "NDSCart.h"
 
 namespace ARMJIT
 {
 
+//#define JIT_DEBUGPRINT(msg, ...) printf(msg, ## __VA_ARGS__)
 #define JIT_DEBUGPRINT(msg, ...)
 
 Compiler* compiler;
@@ -159,12 +166,15 @@ void FloodFillSetFlags(FetchedInstr instrs[], int start, u8 flags)
 	}
 }
 
-bool DecodeBranch(bool thumb, const FetchedInstr& instr, u32& cond, u32& targetAddr)
+bool DecodeBranch(bool thumb, const FetchedInstr& instr, u32& cond, bool hasLink, u32 lr, bool& link, u32& linkAddr, u32& targetAddr)
 {
 	if (thumb)
 	{
 		u32 r15 = instr.Addr + 4;
 		cond = 0xE;
+
+		link = instr.Info.Kind == ARMInstrInfo::tk_BL_LONG;
+		linkAddr = instr.Addr + 4;
 
 		if (instr.Info.Kind == ARMInstrInfo::tk_BL_LONG && !(instr.Instr & (1 << 12)))
 		{
@@ -185,16 +195,33 @@ bool DecodeBranch(bool thumb, const FetchedInstr& instr, u32& cond, u32& targetA
 			targetAddr = r15 + offset;
 			return true;
 		}
+		else if (hasLink && instr.Info.Kind == ARMInstrInfo::tk_BX && instr.A_Reg(3) == 14)
+		{
+			JIT_DEBUGPRINT("returning!\n");
+			targetAddr = lr;
+			return true;
+		}
 	}
 	else
 	{
 		cond = instr.Cond();
+
+		link = instr.Info.Kind == ARMInstrInfo::ak_BL;
+		linkAddr = instr.Addr + 4;
+
 		if (instr.Info.Kind == ARMInstrInfo::ak_BL 
 			|| instr.Info.Kind == ARMInstrInfo::ak_B)
 		{
 			s32 offset = (s32)(instr.Instr << 8) >> 6;
 			u32 r15 = instr.Addr + 8;
 			targetAddr = r15 + offset;
+
+			return true;
+		}
+		else if (hasLink && instr.Info.Kind == ARMInstrInfo::ak_BX && instr.A_Reg(0) == 14)
+		{
+			JIT_DEBUGPRINT("returning!\n");
+			targetAddr = lr;
 			return true;
 		}
 	}
@@ -207,11 +234,12 @@ bool IsIdleLoop(FetchedInstr* instrs, int instrsCount)
 	// it basically checks if one iteration of a loop depends on another
 	// the rules are quite simple
 
+	JIT_DEBUGPRINT("checking potential idle loop\n");
 	u16 regsWrittenTo = 0;
 	u16 regsDisallowedToWrite = 0;
 	for (int i = 0; i < instrsCount; i++)
 	{
-		//printf("instr %d %x regs(%x %x) %x %x\n", i, instrs[i].Instr, instrs[i].Info.DstRegs, instrs[i].Info.SrcRegs, regsWrittenTo, regsDisallowedToWrite);
+		JIT_DEBUGPRINT("instr %d %x regs(%x %x) %x %x\n", i, instrs[i].Instr, instrs[i].Info.DstRegs, instrs[i].Info.SrcRegs, regsWrittenTo, regsDisallowedToWrite);
 		if (instrs[i].Info.SpecialKind == ARMInstrInfo::special_WriteMem)
 			return false;
 		if (i < instrsCount - 1 && instrs[i].Info.Branches())
@@ -285,6 +313,13 @@ InterpreterFunc InterpretARM[ARMInstrInfo::ak_Count] =
 #undef F_MEM_HD
 #undef F
 
+void T_BL_LONG(ARM* cpu)
+{
+	ARMInterpreter::T_BL_LONG_1(cpu);
+	cpu->R[15] += 2;
+	ARMInterpreter::T_BL_LONG_2(cpu);
+}
+
 #define F(x) ARMInterpreter::T_##x
 InterpreterFunc InterpretTHUMB[ARMInstrInfo::tk_Count] =
 {
@@ -302,7 +337,7 @@ InterpreterFunc InterpretTHUMB[ARMInstrInfo::tk_Count] =
 	F(PUSH), F(POP), F(LDMIA), F(STMIA),
 	F(BCOND), F(BX), F(BLX_REG), F(B), F(BL_LONG_1), F(BL_LONG_2),
 	F(UNK), F(SVC), 
-	NULL // BL_LONG psudo opcode
+	T_BL_LONG // BL_LONG psudo opcode
 };
 #undef F
 
@@ -344,6 +379,8 @@ void CompileBlock(ARM* cpu)
 		CodeRanges[pseudoPhysicalAddr / 256].TimesInvalidated);
 
 	u32 lastSegmentStart = blockAddr;
+	u32 lr;
+	bool hasLink;
 
     do
     {
@@ -407,6 +444,9 @@ void CompileBlock(ARM* cpu)
 		cpu->CurInstr = instrs[i].Instr;
 		cpu->CodeCycles = instrs[i].CodeCycles;
 
+		if (instrs[i].Info.DstRegs & (1 << 14))
+			hasLink = false;
+
 		if (thumb)
 		{
 			InterpretTHUMB[instrs[i].Info.Kind](cpu);
@@ -446,8 +486,9 @@ void CompileBlock(ARM* cpu)
 		{
 			bool hasBranched = cpu->R[15] != r15;
 
-			u32 cond, target;
-			bool staticBranch = DecodeBranch(thumb, instrs[i], cond, target);
+			bool link;
+			u32 cond, target, linkAddr;
+			bool staticBranch = DecodeBranch(thumb, instrs[i], cond, hasLink, lr, link, linkAddr, target);
 			JIT_DEBUGPRINT("branch cond %x target %x (%d)\n", cond, target, hasBranched);
 
 			if (staticBranch)
@@ -467,20 +508,26 @@ void CompileBlock(ARM* cpu)
 
 				if (cond < 0xE && target < instrs[i].Addr && target >= lastSegmentStart)
 				{
-					// we might have an idle loop
-					u32 offset = (target - blockAddr) / (thumb ? 2 : 4);
-					if (IsIdleLoop(instrs + offset, i - offset + 1))
+					// we might have an idle loop...
+					u32 backwardsOffset = (instrs[i].Addr - target) / (thumb ? 2 : 4);
+					if (IsIdleLoop(&instrs[i - backwardsOffset], backwardsOffset + 1))
 					{
 						instrs[i].BranchFlags |= branch_IdleBranch;
 						JIT_DEBUGPRINT("found %s idle loop %d in block %x\n", thumb ? "thumb" : "arm", cpu->Num, blockAddr);
 					}
 				}
-				else if (hasBranched && (!thumb || cond == 0xE) && !isBackJump && i + 1 < Config::JIT_MaxBlockSize)
+				else if (hasBranched && !isBackJump && i + 1 < Config::JIT_MaxBlockSize)
 				{
 					u32 targetPseudoPhysical = cpu->Num == 0
 						? TranslateAddr<0>(target)
 						: TranslateAddr<1>(target);
 					
+					if (link)
+					{
+						lr = linkAddr;
+						hasLink = true;
+					}
+
 					r15 = target + (thumb ? 2 : 4);
 					assert(r15 == cpu->R[15]);
 
@@ -723,6 +770,9 @@ void* GetFuncForAddr(ARM* cpu, u32 addr, bool store, int size)
 				case 33: return (void*)GPU3D::Write32;
 				}
 			}
+
+			if (!store && size == 32 && addr == 0x04100010 && NDS::ExMemCnt[0] & (1<<11))
+				return (void*)NDSCart::ReadROMData;
 
 			switch (size | store)
 			{

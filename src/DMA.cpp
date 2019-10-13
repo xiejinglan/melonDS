@@ -22,6 +22,8 @@
 #include "NDSCart.h"
 #include "GPU.h"
 
+#include "switch/profiler.h"
+
 
 // NOTES ON DMA SHIT
 //
@@ -292,7 +294,6 @@ void DMA::Run9()
             if (StartMode == 0x07)
                 GPU3D::CheckFIFODMA();
         }
-
         return;
     }
 
@@ -310,6 +311,8 @@ void DMA::Run9()
 void DMA::Run7()
 {
     if (NDS::ARM7Timestamp >= NDS::ARM7Target) return;
+
+    PROFILER_SECTION(dma7)
 
     Executing = true;
 
@@ -402,6 +405,7 @@ void DMA::Run7()
             NDS::ResumeCPU(1, 1<<Num);
         }
 
+        PROFILER_END_SECTION
         return;
     }
 
@@ -414,4 +418,6 @@ void DMA::Run7()
     Running = 0;
     InProgress = false;
     NDS::ResumeCPU(1, 1<<Num);
+
+    PROFILER_END_SECTION
 }

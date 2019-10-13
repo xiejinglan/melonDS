@@ -24,6 +24,7 @@
 #include "WifiAP.h"
 #include "Platform.h"
 
+#include "switch/profiler.h"
 
 namespace Wifi
 {
@@ -966,6 +967,8 @@ void MSTimer()
 
 void USTimer(u32 param)
 {
+    PROFILER_SECTION(wifiUSTTimer)
+
     WifiAP::USTimer();
 
     if (IOPORT(W_USCountCnt))
@@ -1100,6 +1103,8 @@ void USTimer(u32 param)
             IOPORT(W_RXTXAddr) = addr >> 1;
         }
     }
+
+    PROFILER_END_SECTION
 
     // TODO: make it more accurate, eventually
     // in the DS, the wifi system has its own 22MHz clock and doesn't use the system clock

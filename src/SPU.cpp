@@ -21,6 +21,7 @@
 #include "NDS.h"
 #include "SPU.h"
 
+#include "switch/profiler.h"
 
 // SPU TODO
 // * capture addition modes, overflow bugs
@@ -582,6 +583,8 @@ void CaptureUnit::Run(s32 sample)
 
 void Mix(u32 samples)
 {
+    PROFILER_SECTION(mixSPU)
+
     s32 channelbuf[32];
     s32 leftbuf[32], rightbuf[32];
     s32 ch0buf[32], ch1buf[32], ch2buf[32], ch3buf[32];
@@ -738,6 +741,8 @@ void Mix(u32 samples)
     }
 
     NDS::ScheduleEvent(NDS::Event_SPU, true, 1024*kSamplesPerRun, Mix, kSamplesPerRun);
+
+    PROFILER_END_SECTION
 }
 
 

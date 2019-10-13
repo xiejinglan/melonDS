@@ -21,6 +21,9 @@
 #include "NDS.h"
 #include "GPU.h"
 
+#include <arm_neon.h>
+
+#include "switch/profiler.h"
 
 // notes on color conversion
 //
@@ -78,6 +81,8 @@
 
 // TODO: find which parts of DISPCNT are latched. for example, not possible to change video mode midframe.
 
+u32 VRAMFlatMap_ABG[0x20];
+u32 VRAMFlatMap_BBG[0x8];
 
 GPU2D::GPU2D(u32 num)
 {
@@ -709,9 +714,52 @@ u32 GPU2D::ColorComposite(int i, u32 val1, u32 val2)
     }
 }
 
-
 void GPU2D::DrawScanline(u32 line)
 {
+    PROFILER_SECTION(gpu2d)
+
+    PROFILER_SECTION(copyRemappedBG)
+    if (Num == 0)
+    {
+        for (int i = 0; i < 0x20; i++)
+        {
+            if (VRAMFlatMap_ABG[i] != GPU::VRAMMap_ABG[i])
+            {
+                if (GPU::VRAMPtr_ABG[i])
+                {
+                    memcpy(&GPU::VRAMFlat_ABG[i * 0x4000], GPU::VRAMPtr_ABG[i], 0x4000);
+                }
+                else
+                {
+                    for (int j = 0; j < 16 * 1024; j += 8)
+                        *(u64*)&GPU::VRAMFlat_ABG[i * 0x4000 + j] = GPU::ReadVRAM_ABG<u64>(i * 0x4000 + j);
+                }
+                VRAMFlatMap_ABG[i] = GPU::VRAMMap_ABG[i];
+                printf("updating %d %d %d\n", i, VRAMFlatMap_ABG[i], GPU::VRAMMap_ABG[i]);
+            }
+        }
+    }
+    else
+    {
+        for (int i = 0; i < 0x8; i++)
+        {
+            if (VRAMFlatMap_BBG[i] != GPU::VRAMMap_BBG[i])
+            {
+                if (GPU::VRAMPtr_BBG[i])
+                {
+                    memcpy(&GPU::VRAMFlat_BBG[i * 0x4000], GPU::VRAMPtr_BBG[i], 0x4000);
+                }
+                else
+                {
+                    for (int j = 0; j < 16 * 1024; j += 8)
+                        *(u64*)&GPU::VRAMFlat_BBG[i * 0x4000 + j] = GPU::ReadVRAM_BBG<u64>(i * 0x4000 + j);
+                }
+                VRAMFlatMap_BBG[i] = GPU::VRAMMap_BBG[i];
+            }
+        }
+    }
+    PROFILER_END_SECTION
+
     int stride = Accelerated ? (256*3 + 1) : 256;
     u32* dst = &Framebuffer[stride * line];
 
@@ -737,6 +785,7 @@ void GPU2D::DrawScanline(u32 line)
         {
             dst[256*3] = 0;
         }
+        PROFILER_END_SECTION
         return;
     }
 
@@ -745,6 +794,7 @@ void GPU2D::DrawScanline(u32 line)
 
     if (Num == 0)
     {
+        PROFILER_SECTION(fetch3dline)
         if (!Accelerated)
             _3DLine = GPU3D::GetLine(n3dline);
         else if ((CaptureCnt & (1<<31)) && (((CaptureCnt >> 29) & 0x3) != 1))
@@ -752,10 +802,15 @@ void GPU2D::DrawScanline(u32 line)
             _3DLine = GPU3D::GetLine(n3dline);
             //GPU3D::GLRenderer::PrepareCaptureFrame();
         }
+        PROFILER_END_SECTION
     }
+
+    PROFILER_SECTION(drawBgs)
 
     // always render regular graphics
     DrawScanline_BGOBJ(line);
+
+    PROFILER_END_SECTION
 
     switch (dispmode)
     {
@@ -783,6 +838,20 @@ void GPU2D::DrawScanline(u32 line)
                 u16* vram = (u16*)GPU::VRAM[vrambank];
                 vram = &vram[line * 256];
 
+                /*uint8x16_t zero = vdupq_n_u8(0);
+                for (int i = 0; i < 256; i += 16)
+                {
+                    uint8x16x2_t color = vld2q_u8((u8*)&vram[i]);
+
+                    uint8x16_t red = vshrq_n_u8(vshlq_n_u8(color.val[0], 3), 2);
+                    uint8x16_t green = vshrq_n_u8(vshlq_n_u8(vcombine_u8(
+                        vshrn_n_u16(vreinterpretq_u16_u8(vzip1q_u8(color.val[0], color.val[1])), 5), 
+                        vshrn_n_u16(vreinterpretq_u16_u8(vzip2q_u8(color.val[0], color.val[1])), 5)), 
+                        3), 2);
+                    uint8x16_t blue = vshlq_n_u8(vshrq_n_u8(vshlq_n_u8(color.val[1], 1), 3), 1);
+
+                    vst4q_u8((u8*)&dst[i], {red, green, blue, zero});
+                }*/
                 for (int i = 0; i < 256; i++)
                 {
                     u16 color = vram[i];
@@ -837,6 +906,7 @@ void GPU2D::DrawScanline(u32 line)
     if (Accelerated)
     {
         dst[256*3] = MasterBrightness | (DispCnt & 0x30000);
+        PROFILER_END_SECTION
         return;
     }
 
@@ -849,10 +919,42 @@ void GPU2D::DrawScanline(u32 line)
             u32 factor = MasterBrightness & 0x1F;
             if (factor > 16) factor = 16;
 
-            for (int i = 0; i < 256; i++)
-            {
-                dst[i] = ColorBrightnessUp(dst[i], factor);
-            }
+            __asm__ volatile (
+                "dup v0.16b, %w[c]\n"
+                "dup v1.16b, %w[factor]\n"
+                "mov w0, #256\n"
+                "mov x1, %[dst]\n"
+
+                "loopStartBrightnessUp:\n"
+                    "ld1 {v2.16b, v3.16b}, [x1]\n"
+
+                    "sub v4.16b, v0.16b, v2.16b\n"
+                    "sub v5.16b, v0.16b, v3.16b\n"
+
+                    "umull v6.8h, v4.8b, v1.8b\n"
+                    "umull2 v7.8h, v4.16b, v1.16b\n"
+
+                    "umull v4.8h, v5.8b, v1.8b\n"
+                    "umull2 v5.8h, v5.16b, v1.16b\n"
+
+                    "shrn v6.8b, v6.8h, #4\n"
+                    "shrn2 v6.16b, v7.8h, #4\n"
+
+                    "shrn v7.8b, v4.8h, #4\n"
+                    "shrn2 v7.16b, v5.8h, #4\n"
+
+                    "add v6.16b, v6.16b, v2.16b\n"
+                    "add v7.16b, v7.16b, v3.16b\n"
+
+                    "st1 {v6.16b, v7.16b}, [x1], #32\n"
+
+                    "sub w0, w0, #8\n"
+                    "cbnz w0, loopStartBrightnessUp"
+                : 
+                : [c] "r" (63), [factor] "r" (factor), [dst] "r" (dst)
+                : "q0", "q1", "q2", "q3", "q4", "q5", "q6", "q7", "w0", "x1",
+                    "memory"
+            );
         }
         else if ((MasterBrightness >> 14) == 2)
         {
@@ -860,10 +962,37 @@ void GPU2D::DrawScanline(u32 line)
             u32 factor = MasterBrightness & 0x1F;
             if (factor > 16) factor = 16;
 
-            for (int i = 0; i < 256; i++)
-            {
-                dst[i] = ColorBrightnessDown(dst[i], factor);
-            }
+            __asm__ volatile (
+                "dup v0.16b, %w[factor]\n"
+                "mov w0, #256\n"
+                "mov x1, %[dst]\n"
+
+                "loopStartBrightnessDown:\n"
+                    "ld1 {v1.16b, v2.16b}, [x1]\n"
+                    
+                    "umull v3.8h, v1.8b, v0.8b\n"
+                    "umull2 v4.8h, v1.16b, v0.16b\n"
+
+                    "umull v5.8h, v2.8b, v0.8b\n"
+                    "umull2 v6.8h, v2.16b, v0.16b\n"
+
+                    "shrn v3.8b, v3.8h, #4\n"
+                    "shrn2 v3.16b, v4.8h, #4\n"
+
+                    "shrn v4.8b, v5.8h, #4\n"
+                    "shrn2 v4.16b, v6.8h, #4\n"
+
+                    "sub v1.16b, v1.16b, v3.16b\n"
+                    "sub v2.16b, v2.16b, v4.16b\n"
+
+                    "st1 {v1.16b, v2.16b}, [x1], #32\n"
+                    
+                    "sub w0, w0, #8\n"
+                    "cbnz w0, loopStartBrightnessDown"
+                :
+                : [factor] "r" (factor), [dst] "r" (dst)
+                : "q0", "q1", "q2", "q3", "q4", "q5", "q6", "memory"
+            );
         }
     }
 
@@ -881,6 +1010,7 @@ void GPU2D::DrawScanline(u32 line)
 
         *(u64*)&dst[i] = c | ((c & 0x00C0C0C000C0C0C0) >> 6) | 0xFF000000FF000000;
     }
+    PROFILER_END_SECTION
 }
 
 void GPU2D::VBlank()
@@ -922,6 +1052,8 @@ void GPU2D::DoCapture(u32 line, u32 width)
     // it should work like VRAM display mode, which requires VRAM to be mapped to LCDC
     if (!(GPU::VRAMMap_LCDC & (1<<dstvram)))
         return;
+
+    PROFILER_SECTION(capture2D)
 
     u16* dst = (u16*)GPU::VRAM[dstvram];
     u32 dstaddr = (((CaptureCnt >> 18) & 0x3) << 14) + (line * width);
@@ -1130,6 +1262,8 @@ void GPU2D::DoCapture(u32 line, u32 width)
         }
         break;
     }
+
+    PROFILER_END_SECTION
 }
 
 void GPU2D::SampleFIFO(u32 offset, u32 num)
@@ -1623,8 +1757,9 @@ void GPU2D::DrawBG_Text(u32 line, u32 bgnum)
     u16 bgcnt = BGCnt[bgnum];
     u32 xmos = 0, xmossize = 0;
 
-    u32 tilesetaddr, tilemapaddr;
-    u16* pal;
+    u8* __restrict__ tileset;
+    u8* __restrict__ tilemap;
+    u16* __restrict__ pal;
     u32 extpal, extpalslot;
 
     u16 xoff = BGXPos[bgnum];
@@ -1644,15 +1779,15 @@ void GPU2D::DrawBG_Text(u32 line, u32 bgnum)
 
     if (Num)
     {
-        tilesetaddr = 0x06200000 + ((bgcnt & 0x003C) << 12);
-        tilemapaddr = 0x06200000 + ((bgcnt & 0x1F00) << 3);
+        tileset = GPU::VRAMFlat_BBG + ((bgcnt & 0x003C) << 12);
+        tilemap = GPU::VRAMFlat_BBG + ((bgcnt & 0x1F00) << 3);
 
         pal = (u16*)&GPU::Palette[0x400];
     }
     else
     {
-        tilesetaddr = 0x06000000 + ((DispCnt & 0x07000000) >> 8) + ((bgcnt & 0x003C) << 12);
-        tilemapaddr = 0x06000000 + ((DispCnt & 0x38000000) >> 11) + ((bgcnt & 0x1F00) << 3);
+        tileset = GPU::VRAMFlat_ABG + ((DispCnt & 0x07000000) >> 8) + ((bgcnt & 0x003C) << 12);
+        tilemap = GPU::VRAMFlat_ABG + ((DispCnt & 0x38000000) >> 11) + ((bgcnt & 0x1F00) << 3);
 
         pal = (u16*)&GPU::Palette[0];
     }
@@ -1660,32 +1795,145 @@ void GPU2D::DrawBG_Text(u32 line, u32 bgnum)
     // adjust Y position in tilemap
     if (bgcnt & 0x8000)
     {
-        tilemapaddr += ((yoff & 0x1F8) << 3);
+        tilemap += ((yoff & 0x1F8) << 3);
         if (bgcnt & 0x4000)
-            tilemapaddr += ((yoff & 0x100) << 3);
+            tilemap += ((yoff & 0x100) << 3);
     }
     else
-        tilemapaddr += ((yoff & 0xF8) << 3);
+        tilemap += ((yoff & 0xF8) << 3);
 
-    u16 curtile;
-    u16* curpal;
-    u32 pixelsaddr;
-    u8 color;
 
     if (bgcnt & 0x0080)
     {
+        PROFILER_SECTION(bg256)
+
+        u32 localOff = xoff & 0x7;
+        if (localOff)
+        {
+            u16 curtile0 = *(u16*)(tilemap + ((xoff & 0xF8) >> 2) + ((xoff & widexmask) << 3));
+            u16* curpal0;
+            if (extpal) curpal0 = GetBGExtPal(extpalslot, curtile0>>12);
+            else        curpal0 = pal;
+            u64 pixelData0 = *(u64*)(tileset + ((curtile0 & 0x03FF) << 6)
+                                        + (((curtile0 & 0x0800) ? (7-(yoff&0x7)) : (yoff&0x7)) << 3));
+
+            for (int i = 0; i < 8 - localOff; i++)
+            {
+                int index = (curtile0 & 0x0400) ? (7 - (i + localOff)) : (i + localOff);
+                u32 color = (pixelData0 >> index * 8) & 0xFF;
+                if (color && (WindowMask[i] & (1 << bgnum)))
+                    DrawPixel_Normal(&BGOBJLine[i], curpal0[color], 0x01000000 << bgnum);
+            }
+            xoff += 8;
+        }
+
+        uint8x16_t bgnumBit = vdupq_n_u8(1 << bgnum);
+
+        for (int i = localOff ? (8 - localOff) : 0; i < ((256 - localOff) & ~0xF); i += 16)
+        {
+            u16 curtile0 = *(u16*)(tilemap + ((xoff & 0xF8) >> 2) + ((xoff & widexmask) << 3));
+            u16* curpal0;
+            if (extpal) curpal0 = GetBGExtPal(extpalslot, curtile0>>12);
+            else        curpal0 = pal;
+            u64 pixelData0 = *(u64*)(tileset + ((curtile0 & 0x03FF) << 6)
+                                         + (((curtile0 & 0x0800) ? (7-(yoff&0x7)) : (yoff&0x7)) << 3));
+            xoff += 8;
+
+            u16 curtile1 = *(u16*)(tilemap + ((xoff & 0xF8) >> 2) + ((xoff & widexmask) << 3));
+            u16* curpal1;
+            if (extpal) curpal1 = GetBGExtPal(extpalslot, curtile1>>12);
+            else        curpal1 = pal;
+            u64 pixelData1 = *(u64*)(tileset + ((curtile1 & 0x03FF) << 6)
+                                         + (((curtile1 & 0x0800) ? (7-(yoff&0x7)) : (yoff&0x7)) << 3));
+            xoff += 8;
+
+            if (pixelData0 == 0 && pixelData1 == 0)
+                continue;
+
+            if (curtile0 & 0x0400)
+                pixelData0 = __builtin_bswap64(pixelData0);
+            if (curtile1 & 0x0400)
+                pixelData1 = __builtin_bswap64(pixelData1);
+
+            uint8x16x2_t coloredPixels;
+            for (int j = 0; j < 8; j++)
+                coloredPixels = vld2q_lane_u8((u8*)(curpal0 + ((pixelData0 >> (j * 8)) & 0xFF)), coloredPixels, j);
+            for (int j = 0; j < 8; j++)
+                coloredPixels = vld2q_lane_u8((u8*)(curpal1 + ((pixelData1 >> (j * 8)) & 0xFF)), coloredPixels, j + 8);
+
+            uint8x16_t coloredPixelsLo = coloredPixels.val[0];
+            uint8x16_t coloredPixelsHi = coloredPixels.val[1];
+
+            uint8x16_t window = vld1q_u8(&WindowMask[i]);
+
+            uint64x2_t pixelsNeon = {pixelData0, pixelData1};
+            uint8x16_t drawMask = vorrq_u8(vceqzq_u8(vreinterpretq_u8_u64(pixelsNeon)), vceqzq_u8(vandq_u8(window, bgnumBit)));
+
+            uint8x16_t red = vshrq_n_u8(vshlq_n_u8(coloredPixelsLo, 3), 2);
+            uint8x16_t green = vshrq_n_u8(vshlq_n_u8(vcombine_u8(
+                vshrn_n_u16(vreinterpretq_u16_u8(vzip1q_u8(coloredPixelsLo, coloredPixelsHi)), 5), 
+                vshrn_n_u16(vreinterpretq_u16_u8(vzip2q_u8(coloredPixelsLo, coloredPixelsHi)), 5)), 
+                3), 2);
+            uint8x16_t blue = vshlq_n_u8(vshrq_n_u8(vshlq_n_u8(coloredPixelsHi, 1), 3), 1);
+
+            uint8x16x4_t prevPrevValues = vld4q_u8((u8*)&BGOBJLine[i + 256]);
+            uint8x16x4_t prevValues = vld4q_u8((u8*)&BGOBJLine[i]);
+
+            red = vbslq_u8(drawMask, prevValues.val[0], red);
+            green = vbslq_u8(drawMask, prevValues.val[1],green);
+            blue = vbslq_u8(drawMask, prevValues.val[2], blue);
+            uint8x16_t meta = vbslq_u8(drawMask, prevValues.val[3], bgnumBit);
+
+            prevValues.val[0] = vbslq_u8(drawMask, prevPrevValues.val[0], prevValues.val[0]);
+            prevValues.val[1] = vbslq_u8(drawMask, prevPrevValues.val[1], prevValues.val[1]);
+            prevValues.val[2] = vbslq_u8(drawMask, prevPrevValues.val[2], prevValues.val[2]);
+            prevValues.val[3] = vbslq_u8(drawMask, prevPrevValues.val[3], prevValues.val[3]);
+
+            vst4q_u8((u8*)&BGOBJLine[i], {red, green, blue, meta});
+
+            vst4q_u8((u8*)&BGOBJLine[i + 256], prevValues);
+        }
+
+        if (localOff)
+        {
+            for (int i = 0; i < 2; i++)
+            {
+                u16 curtile0 = *(u16*)(tilemap + ((xoff & 0xF8) >> 2) + ((xoff & widexmask) << 3));
+                u16* curpal0;
+                if (extpal) curpal0 = GetBGExtPal(extpalslot, curtile0>>12);
+                else        curpal0 = pal;
+                u64 pixelData0 = *(u64*)(tileset + ((curtile0 & 0x03FF) << 6)
+                                            + (((curtile0 & 0x0800) ? (7-(yoff&0x7)) : (yoff&0x7)) << 3));
+                xoff += 8;
+
+                int tileSize = i == 0 ? 8 : localOff;
+                int start = 256 - localOff - (1 - i) * 8;
+                for (int j = 0; j < tileSize; j++)
+                {
+                    int index = (curtile0 & 0x0400) ? (7 - j) : j;
+                    u32 color = (pixelData0 >> index * 8) & 0xFF;
+                    if (color && (WindowMask[start + j] & (1 << bgnum)))
+                        DrawPixel_Normal(&BGOBJLine[start + j], curpal0[color], 0x01000000 << bgnum);
+                }
+            }
+        }
+
         // 256-color
+        /*u16 curtile;
+        u16* curpal;
+        u8* pixels;
+        u8 color;
 
         // preload shit as needed
         if (xoff & 0x7)
         {
             // load a new tile
-            curtile = GPU::ReadVRAM_BG<u16>(tilemapaddr + ((xoff & 0xF8) >> 2) + ((xoff & widexmask) << 3));
+            curtile = *(u16*)(tilemap + ((xoff & 0xF8) >> 2) + ((xoff & widexmask) << 3));
 
             if (extpal) curpal = GetBGExtPal(extpalslot, curtile>>12);
             else        curpal = pal;
 
-            pixelsaddr = tilesetaddr + ((curtile & 0x03FF) << 6)
+            pixels = tileset + ((curtile & 0x03FF) << 6)
                                      + (((curtile & 0x0800) ? (7-(yoff&0x7)) : (yoff&0x7)) << 3);
         }
 
@@ -1694,12 +1942,12 @@ void GPU2D::DrawBG_Text(u32 line, u32 bgnum)
             if (!(xoff & 0x7))
             {
                 // load a new tile
-                curtile = GPU::ReadVRAM_BG<u16>(tilemapaddr + ((xoff & 0xF8) >> 2) + ((xoff & widexmask) << 3));
+                curtile = *(u16*)(tilemap + ((xoff & 0xF8) >> 2) + ((xoff & widexmask) << 3));
 
                 if (extpal) curpal = GetBGExtPal(extpalslot, curtile>>12);
                 else        curpal = pal;
 
-                pixelsaddr = tilesetaddr + ((curtile & 0x03FF) << 6)
+                pixels = tileset + ((curtile & 0x03FF) << 6)
                                          + (((curtile & 0x0800) ? (7-(yoff&0x7)) : (yoff&0x7)) << 3);
             }
 
@@ -1709,7 +1957,7 @@ void GPU2D::DrawBG_Text(u32 line, u32 bgnum)
                 if (xmos == 0)
                 {
                     u32 tilexoff = (curtile & 0x0400) ? (7-(xoff&0x7)) : (xoff&0x7);
-                    color = GPU::ReadVRAM_BG<u8>(pixelsaddr + tilexoff);
+                    color = *(pixels + tilexoff);
                     xmos = xmossize;
                 }
                 else
@@ -1720,19 +1968,140 @@ void GPU2D::DrawBG_Text(u32 line, u32 bgnum)
             }
 
             xoff++;
-        }
+        }*/
+        PROFILER_END_SECTION
     }
     else
     {
         // 16-color
 
+        PROFILER_SECTION(bg16)
+
+        uint8x16_t adjustPaletteIndices = {0, 0, 0, 0, 0, 0, 0, 0, 16, 16, 16, 16, 16, 16, 16, 16};
+
+        u32 localOff = xoff & 0x7;
+        if (localOff)
+        {
+            u16 curtile0 = *(u16*)(tilemap + ((xoff & 0xF8) >> 2) + ((xoff & widexmask) << 3));
+            u16* curpal0 = pal + ((curtile0 & 0xF000) >> 8);
+            u8* pixels0 = tileset + ((curtile0 & 0x03FF) << 5)
+                                     + (((curtile0 & 0x0800) ? (7-(yoff&0x7)) : (yoff&0x7)) << 2);
+
+            for (int i = 0; i < 8 - localOff; i++)
+            {
+                int index = (curtile0 & 0x0400) ? (7 - (i + localOff)) : (i + localOff);
+                u32 color = (index & 1) ? (pixels0[index >> 1] >> 4) : (pixels0[index >> 1] & 0xF);
+                if (color && (WindowMask[i] & (1 << bgnum)))
+                    DrawPixel_Normal(&BGOBJLine[i], curpal0[color], 0x01000000 << bgnum);
+            }
+
+            xoff += 8;
+        }
+
+        uint8x16_t bgnumBit = vdupq_n_u8(1 << bgnum);
+
+        for (int i = localOff ? (8 - localOff) : 0; i < ((256 - localOff) & ~0xF); i += 16)
+        {
+            u16 curtile0 = *(u16*)(tilemap + ((xoff & 0xF8) >> 2) + ((xoff & widexmask) << 3));
+            u16* curpal0 = pal + ((curtile0 & 0xF000) >> 8);
+            u8* pixels0 = tileset + ((curtile0 & 0x03FF) << 5)
+                                     + (((curtile0 & 0x0800) ? (7-(yoff&0x7)) : (yoff&0x7)) << 2);
+            xoff += 8;
+
+            u16 curtile1 = *(u16*)(tilemap + ((xoff & 0xF8) >> 2) + ((xoff & widexmask) << 3));
+            u16* curpal1 = pal + ((curtile1 & 0xF000) >> 8);
+            u8* pixels1 = tileset + ((curtile1 & 0x03FF) << 5)
+                                     + (((curtile1 & 0x0800) ? (7-(yoff&0x7)) : (yoff&0x7)) << 2);
+            xoff += 8;
+
+            if (*((u32*)pixels0) == 0 && *((u32*)pixels1) == 0)
+                continue;
+
+            uint8x16x2_t pal0 = vld2q_u8((u8*)curpal0);
+            uint8x16x2_t pal1 = vld2q_u8((u8*)curpal1);
+
+            uint8x8_t pixelData0 = vld1_u8(pixels0);
+            uint8x8_t pixelData1 = vld1_u8(pixels1);
+
+            pixelData0 = vzip1_u8(vshr_n_u8(vshl_n_u8(pixelData0, 4), 4), vshr_n_u8(pixelData0, 4));
+            pixelData1 = vzip1_u8(vshr_n_u8(vshl_n_u8(pixelData1, 4), 4), vshr_n_u8(pixelData1, 4));
+
+            if (curtile0 & 0x0400)
+                pixelData0 = vrev64_u8(pixelData0);
+            if (curtile1 & 0x0400)
+                pixelData1 = vrev64_u8(pixelData1);
+
+            uint8x16_t window = vld1q_u8(&WindowMask[i]);
+
+            uint8x16_t pixelData = vcombine_u8(pixelData0, pixelData1);
+            uint8x16_t pixelIndices = vaddq_u8(pixelData, adjustPaletteIndices);
+
+            uint8x16_t drawMask = vorrq_u8(vceqzq_u8(pixelData), vceqzq_u8(vandq_u8(window, bgnumBit)));
+
+            uint8x16_t coloredPixelsLo = vqtbl2q_u8({pal0.val[0], pal1.val[0]}, pixelIndices);
+            uint8x16_t coloredPixelsHi = vqtbl2q_u8({pal0.val[1], pal1.val[1]}, pixelIndices);
+
+            uint8x16_t red = vshrq_n_u8(vshlq_n_u8(coloredPixelsLo, 3), 2);
+            uint8x16_t green = vshrq_n_u8(vshlq_n_u8(vcombine_u8(
+                vshrn_n_u16(vreinterpretq_u16_u8(vzip1q_u8(coloredPixelsLo, coloredPixelsHi)), 5), 
+                vshrn_n_u16(vreinterpretq_u16_u8(vzip2q_u8(coloredPixelsLo, coloredPixelsHi)), 5)), 
+                3), 2);
+            uint8x16_t blue = vshlq_n_u8(vshrq_n_u8(vshlq_n_u8(coloredPixelsHi, 1), 3), 1);
+
+            uint8x16x4_t prevPrevValues = vld4q_u8((u8*)&BGOBJLine[i + 256]);
+            uint8x16x4_t prevValues = vld4q_u8((u8*)&BGOBJLine[i]);
+
+            red = vbslq_u8(drawMask, prevValues.val[0], red);
+            green = vbslq_u8(drawMask, prevValues.val[1],green);
+            blue = vbslq_u8(drawMask, prevValues.val[2], blue);
+            uint8x16_t meta = vbslq_u8(drawMask, prevValues.val[3], bgnumBit);
+
+            prevValues.val[0] = vbslq_u8(drawMask, prevPrevValues.val[0], prevValues.val[0]);
+            prevValues.val[1] = vbslq_u8(drawMask, prevPrevValues.val[1], prevValues.val[1]);
+            prevValues.val[2] = vbslq_u8(drawMask, prevPrevValues.val[2], prevValues.val[2]);
+            prevValues.val[3] = vbslq_u8(drawMask, prevPrevValues.val[3], prevValues.val[3]);
+
+            vst4q_u8((u8*)&BGOBJLine[i], {red, green, blue, meta});
+
+            vst4q_u8((u8*)&BGOBJLine[i + 256], prevValues);
+        }
+
+        if (localOff)
+        {
+            for (int i = 0; i < 2; i++)
+            {
+                u16 curtile0 = *(u16*)(tilemap + ((xoff & 0xF8) >> 2) + ((xoff & widexmask) << 3));
+                u16* curpal0 = pal + ((curtile0 & 0xF000) >> 8);
+                u8* pixels0 = tileset + ((curtile0 & 0x03FF) << 5)
+                                        + (((curtile0 & 0x0800) ? (7-(yoff&0x7)) : (yoff&0x7)) << 2);
+
+                xoff += 8;
+
+                int tileSize = i == 0 ? 8 : localOff;
+                int start = 256 - localOff - (1 - i) * 8;
+                for (int j = 0; j < tileSize; j++)
+                {
+                    int index = (curtile0 & 0x0400) ? (7 - j) : j;
+                    u32 color = (index & 1) ? (pixels0[index >> 1] >> 4) : (pixels0[index >> 1] & 0xF);
+                    if (color && (WindowMask[start + j] & (1 << bgnum)))
+                        DrawPixel_Normal(&BGOBJLine[start + j], curpal0[color], 0x01000000 << bgnum);
+                }
+            }
+        }
+
+        PROFILER_END_SECTION
+
+        /*u16 curtile;
+        u16* curpal;
+        u8* pixels;
+        u16 color;
         // preload shit as needed
         if (xoff & 0x7)
         {
             // load a new tile
-            curtile = GPU::ReadVRAM_BG<u16>(tilemapaddr + ((xoff & 0xF8) >> 2) + ((xoff & widexmask) << 3));
+            curtile = *(u16*)(tilemap + ((xoff & 0xF8) >> 2) + ((xoff & widexmask) << 3));
             curpal = pal + ((curtile & 0xF000) >> 8);
-            pixelsaddr = tilesetaddr + ((curtile & 0x03FF) << 5)
+            pixels = tileset + ((curtile & 0x03FF) << 5)
                                      + (((curtile & 0x0800) ? (7-(yoff&0x7)) : (yoff&0x7)) << 2);
         }
 
@@ -1741,9 +2110,9 @@ void GPU2D::DrawBG_Text(u32 line, u32 bgnum)
             if (!(xoff & 0x7))
             {
                 // load a new tile
-                curtile = GPU::ReadVRAM_BG<u16>(tilemapaddr + ((xoff & 0xF8) >> 2) + ((xoff & widexmask) << 3));
+                curtile = *(u16*)(tilemap + ((xoff & 0xF8) >> 2) + ((xoff & widexmask) << 3));
                 curpal = pal + ((curtile & 0xF000) >> 8);
-                pixelsaddr = tilesetaddr + ((curtile & 0x03FF) << 5)
+                pixels = tileset + ((curtile & 0x03FF) << 5)
                                          + (((curtile & 0x0800) ? (7-(yoff&0x7)) : (yoff&0x7)) << 2);
             }
 
@@ -1756,11 +2125,11 @@ void GPU2D::DrawBG_Text(u32 line, u32 bgnum)
                     u32 tilexoff = (curtile & 0x0400) ? (7-(xoff&0x7)) : (xoff&0x7);
                     if (tilexoff & 0x1)
                     {
-                        color = GPU::ReadVRAM_BG<u8>(pixelsaddr + (tilexoff >> 1)) >> 4;
+                        color = *(pixels + (tilexoff >> 1)) >> 4;
                     }
                     else
                     {
-                        color = GPU::ReadVRAM_BG<u8>(pixelsaddr + (tilexoff >> 1)) & 0x0F;
+                        color = *(pixels + (tilexoff >> 1)) & 0x0F;
                     }
                     xmos = xmossize;
                 }
@@ -1768,11 +2137,19 @@ void GPU2D::DrawBG_Text(u32 line, u32 bgnum)
                     xmos--;
 
                 if (color)
-                    DrawPixel(&BGOBJLine[i], curpal[color], 0x01000000<<bgnum);
+                {
+                    u16 palColor = curpal[color];
+                    u8 r = (palColor & 0x001F) << 1;
+                    u8 g = (palColor & 0x03E0) >> 4;
+                    u8 b = (palColor & 0x7C00) >> 9;
+
+                    BGOBJLine[i] = BGOBJLine[i + 256];
+                    BGOBJLine[i] = r | (g << 8) | (b << 16) | 0x01000000<<bgnum;
+                }
             }
 
             xoff++;
-        }
+        }*/
     }
 }
 
@@ -1781,7 +2158,7 @@ void GPU2D::DrawBG_Affine(u32 line, u32 bgnum)
     u16 bgcnt = BGCnt[bgnum];
     u32 xmos = 0, xmossize = 0;
 
-    u32 tilesetaddr, tilemapaddr;
+    u8* tileset, *tilemap;
     u16* pal;
 
     u32 coordmask;
@@ -1816,15 +2193,15 @@ void GPU2D::DrawBG_Affine(u32 line, u32 bgnum)
 
     if (Num)
     {
-        tilesetaddr = 0x06200000 + ((bgcnt & 0x003C) << 12);
-        tilemapaddr = 0x06200000 + ((bgcnt & 0x1F00) << 3);
+        tileset = GPU::VRAMFlat_ABG + ((bgcnt & 0x003C) << 12);
+        tilemap = GPU::VRAMFlat_ABG + ((bgcnt & 0x1F00) << 3);
 
         pal = (u16*)&GPU::Palette[0x400];
     }
     else
     {
-        tilesetaddr = 0x06000000 + ((DispCnt & 0x07000000) >> 8) + ((bgcnt & 0x003C) << 12);
-        tilemapaddr = 0x06000000 + ((DispCnt & 0x38000000) >> 11) + ((bgcnt & 0x1F00) << 3);
+        tileset = GPU::VRAMFlat_BBG + ((DispCnt & 0x07000000) >> 8) + ((bgcnt & 0x003C) << 12);
+        tilemap = GPU::VRAMFlat_BBG + ((DispCnt & 0x38000000) >> 11) + ((bgcnt & 0x1F00) << 3);
 
         pal = (u16*)&GPU::Palette[0];
     }
@@ -1841,23 +2218,23 @@ void GPU2D::DrawBG_Affine(u32 line, u32 bgnum)
             if (xmos > 0)
             {
                 if (color)
-                    DrawPixel(&BGOBJLine[i], pal[color], 0x01000000<<bgnum);
+                    DrawPixel_Normal(&BGOBJLine[i], pal[color], 0x01000000<<bgnum);
 
                 xmos--;
             }
             else
             if ((!((rotX|rotY) & overflowmask)))
             {
-                curtile = GPU::ReadVRAM_BG<u8>(tilemapaddr + ((((rotY & coordmask) >> 11) << yshift) + ((rotX & coordmask) >> 11)));
+                curtile = *(tilemap + ((((rotY & coordmask) >> 11) << yshift) + ((rotX & coordmask) >> 11)));
 
                 // draw pixel
                 u32 tilexoff = (rotX >> 8) & 0x7;
                 u32 tileyoff = (rotY >> 8) & 0x7;
 
-                color = GPU::ReadVRAM_BG<u8>(tilesetaddr + (curtile << 6) + (tileyoff << 3) + tilexoff);
+                color = *(tileset + (curtile << 6) + (tileyoff << 3) + tilexoff);
 
                 if (color)
-                    DrawPixel(&BGOBJLine[i], pal[color], 0x01000000<<bgnum);
+                    DrawPixel_Normal(&BGOBJLine[i], pal[color], 0x01000000<<bgnum);
 
                 xmos = xmossize;
             }
@@ -1876,7 +2253,7 @@ void GPU2D::DrawBG_Extended(u32 line, u32 bgnum)
     u16 bgcnt = BGCnt[bgnum];
     u32 xmos = 0, xmossize = 0;
 
-    u32 tilesetaddr, tilemapaddr;
+    u8* tileset, *tilemap;
     u16* pal;
     u32 extpal;
 
@@ -1924,8 +2301,8 @@ void GPU2D::DrawBG_Extended(u32 line, u32 bgnum)
             ofymask = ~ymask;
         }
 
-        if (Num) tilemapaddr = 0x06200000 + ((bgcnt & 0x1F00) << 6);
-        else     tilemapaddr = 0x06000000 + ((bgcnt & 0x1F00) << 6);
+        if (Num) tilemap = GPU::VRAMFlat_BBG + ((bgcnt & 0x1F00) << 6);
+        else     tilemap = GPU::VRAMFlat_ABG + ((bgcnt & 0x1F00) << 6);
 
         if (bgcnt & 0x0004)
         {
@@ -1940,17 +2317,17 @@ void GPU2D::DrawBG_Extended(u32 line, u32 bgnum)
                     if (xmos > 0)
                     {
                         if (color & 0x8000)
-                            DrawPixel(&BGOBJLine[i], color, 0x01000000<<bgnum);
+                            DrawPixel_Normal(&BGOBJLine[i], color, 0x01000000<<bgnum);
 
                         xmos--;
                     }
                     else
                     if (!(rotX & ofxmask) && !(rotY & ofymask))
                     {
-                        color = GPU::ReadVRAM_BG<u16>(tilemapaddr + (((((rotY & ymask) >> 8) << yshift) + ((rotX & xmask) >> 8)) << 1));
+                        color = *(u16*)(tilemap + (((((rotY & ymask) >> 8) << yshift) + ((rotX & xmask) >> 8)) << 1));
 
                         if (color & 0x8000)
-                            DrawPixel(&BGOBJLine[i], color, 0x01000000<<bgnum);
+                            DrawPixel_Normal(&BGOBJLine[i], color, 0x01000000<<bgnum);
 
                         xmos = xmossize;
                     }
@@ -1976,17 +2353,17 @@ void GPU2D::DrawBG_Extended(u32 line, u32 bgnum)
                     if (xmos > 0)
                     {
                         if (color)
-                            DrawPixel(&BGOBJLine[i], pal[color], 0x01000000<<bgnum);
+                            DrawPixel_Normal(&BGOBJLine[i], pal[color], 0x01000000<<bgnum);
 
                         xmos--;
                     }
                     else
                     if (!(rotX & ofxmask) && !(rotY & ofymask))
                     {
-                        color = GPU::ReadVRAM_BG<u8>(tilemapaddr + (((rotY & ymask) >> 8) << yshift) + ((rotX & xmask) >> 8));
+                        color = *(tilemap + (((rotY & ymask) >> 8) << yshift) + ((rotX & xmask) >> 8));
 
                         if (color)
-                            DrawPixel(&BGOBJLine[i], pal[color], 0x01000000<<bgnum);
+                            DrawPixel_Normal(&BGOBJLine[i], pal[color], 0x01000000<<bgnum);
 
                         xmos = xmossize;
                     }
@@ -2017,15 +2394,15 @@ void GPU2D::DrawBG_Extended(u32 line, u32 bgnum)
 
         if (Num)
         {
-            tilesetaddr = 0x06200000 + ((bgcnt & 0x003C) << 12);
-            tilemapaddr = 0x06200000 + ((bgcnt & 0x1F00) << 3);
+            tileset = GPU::VRAMFlat_BBG + ((bgcnt & 0x003C) << 12);
+            tilemap = GPU::VRAMFlat_BBG + ((bgcnt & 0x1F00) << 3);
 
             pal = (u16*)&GPU::Palette[0x400];
         }
         else
         {
-            tilesetaddr = 0x06000000 + ((DispCnt & 0x07000000) >> 8) + ((bgcnt & 0x003C) << 12);
-            tilemapaddr = 0x06000000 + ((DispCnt & 0x38000000) >> 11) + ((bgcnt & 0x1F00) << 3);
+            tileset = GPU::VRAMFlat_ABG + ((DispCnt & 0x07000000) >> 8) + ((bgcnt & 0x003C) << 12);
+            tilemap = GPU::VRAMFlat_ABG + ((DispCnt & 0x38000000) >> 11) + ((bgcnt & 0x1F00) << 3);
 
             pal = (u16*)&GPU::Palette[0];
         }
@@ -2043,14 +2420,14 @@ void GPU2D::DrawBG_Extended(u32 line, u32 bgnum)
                 if (xmos > 0)
                 {
                     if (color)
-                        DrawPixel(&BGOBJLine[i], curpal[color], 0x01000000<<bgnum);
+                        DrawPixel_Normal(&BGOBJLine[i], curpal[color], 0x01000000<<bgnum);
 
                     xmos--;
                 }
                 else
                 if ((!((rotX|rotY) & overflowmask)))
                 {
-                    curtile = GPU::ReadVRAM_BG<u16>(tilemapaddr + (((((rotY & coordmask) >> 11) << yshift) + ((rotX & coordmask) >> 11)) << 1));
+                    curtile = *(u16*)(tilemap + (((((rotY & coordmask) >> 11) << yshift) + ((rotX & coordmask) >> 11)) << 1));
 
                     if (extpal) curpal = GetBGExtPal(bgnum, curtile>>12);
                     else        curpal = pal;
@@ -2062,10 +2439,10 @@ void GPU2D::DrawBG_Extended(u32 line, u32 bgnum)
                     if (curtile & 0x0400) tilexoff = 7-tilexoff;
                     if (curtile & 0x0800) tileyoff = 7-tileyoff;
 
-                    color = GPU::ReadVRAM_BG<u8>(tilesetaddr + ((curtile & 0x03FF) << 6) + (tileyoff << 3) + tilexoff);
+                    color = *(u8*)(tileset + ((curtile & 0x03FF) << 6) + (tileyoff << 3) + tilexoff);
 
                     if (color)
-                        DrawPixel(&BGOBJLine[i], curpal[color], 0x01000000<<bgnum);
+                        DrawPixel_Normal(&BGOBJLine[i], curpal[color], 0x01000000<<bgnum);
 
                     xmos = xmossize;
                 }
@@ -2085,7 +2462,7 @@ void GPU2D::DrawBG_Large(u32 line) // BG is always BG2
     u16 bgcnt = BGCnt[2];
     u32 xmos = 0, xmossize = 0;
 
-    u32 tilesetaddr, tilemapaddr;
+    u8* tilemap;
     u16* pal;
 
     // large BG sizes:
@@ -2131,8 +2508,8 @@ void GPU2D::DrawBG_Large(u32 line) // BG is always BG2
         xmossize = BGMosaicSize[0];
     }
 
-    if (Num) tilemapaddr = 0x06200000;
-    else     tilemapaddr = 0x06000000;
+    if (Num) tilemap = GPU::VRAMFlat_ABG;
+    else     tilemap = GPU::VRAMFlat_ABG;
 
     // 256-color bitmap
 
@@ -2148,17 +2525,17 @@ void GPU2D::DrawBG_Large(u32 line) // BG is always BG2
             if (xmos > 0)
             {
                 if (color)
-                    DrawPixel(&BGOBJLine[i], pal[color], 0x01000000<<2);
+                    DrawPixel_Normal(&BGOBJLine[i], pal[color], 0x01000000<<2);
 
                 xmos--;
             }
             else
             if (!(rotX & ofxmask) && !(rotY & ofymask))
             {
-                color = GPU::ReadVRAM_BG<u8>(tilemapaddr + (((rotY & ymask) >> 8) << yshift) + ((rotX & xmask) >> 8));
+                color = *(tilemap + (((rotY & ymask) >> 8) << yshift) + ((rotX & xmask) >> 8));
 
                 if (color)
-                    DrawPixel(&BGOBJLine[i], pal[color], 0x01000000<<2);
+                    DrawPixel_Normal(&BGOBJLine[i], pal[color], 0x01000000<<2);
             }
         }
 
@@ -2172,13 +2549,15 @@ void GPU2D::DrawBG_Large(u32 line) // BG is always BG2
 
 void GPU2D::InterleaveSprites(u32 prio)
 {
+    PROFILER_SECTION(interleaveSprites)
     for (u32 i = 0; i < 256; i++)
     {
         if (((OBJLine[i] & 0xF8000) == prio) && (WindowMask[i] & 0x10))
         {
-            DrawPixel(&BGOBJLine[i], OBJLine[i] & 0x7FFF, OBJLine[i] & 0xFF000000);
+            DrawPixel_Normal(&BGOBJLine[i], OBJLine[i] & 0x7FFF, OBJLine[i] & 0xFF000000);
         }
     }
+    PROFILER_END_SECTION
 }
 
 void GPU2D::DrawSprites(u32 line)

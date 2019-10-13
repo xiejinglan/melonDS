@@ -32,6 +32,10 @@
 #include "Platform.h"
 #include "ARMJIT.h"
 
+#include "dolphin/BitSet.h"
+
+#include "switch/custom_counter.h"
+#include "switch/profiler.h"
 
 namespace NDS
 {
@@ -828,19 +832,23 @@ u32 RunFrame()
         }
         else if (CPUStop & 0x0FFF)
         {
+            PROFILER_SECTION(dma9)
             DMAs[0]->Run();
             if (!(CPUStop & 0x80000000)) DMAs[1]->Run();
             if (!(CPUStop & 0x80000000)) DMAs[2]->Run();
             if (!(CPUStop & 0x80000000)) DMAs[3]->Run();
+            PROFILER_END_SECTION
         }
         else
         {
+            PROFILER_SECTION(armv5)
 #ifdef JIT_ENABLED
             if (EnableJIT)
                 ARM9->ExecuteJIT();
             else
 #endif
                 ARM9->Execute();
+            PROFILER_END_SECTION
         }
 
         RunTimers(0);
@@ -855,19 +863,23 @@ u32 RunFrame()
 
             if (CPUStop & 0x0FFF0000)
             {
+                PROFILER_SECTION(dma7)
                 DMAs[4]->Run();
                 DMAs[5]->Run();
                 DMAs[6]->Run();
                 DMAs[7]->Run();
+                PROFILER_END_SECTION
             }
             else
             {
+                PROFILER_SECTION(armv4)
 #ifdef JIT_ENABLED
                 if (EnableJIT)
                     ARM7->ExecuteJIT();
                 else
 #endif
                     ARM7->Execute();
+                PROFILER_END_SECTION
             }
 
             RunTimers(1);

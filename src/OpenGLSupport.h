@@ -21,8 +21,12 @@
 
 #include <stdio.h>
 #include <string.h>
+#ifndef __SWITCH__
 #include <GL/gl.h>
 #include <GL/glext.h>
+#else
+#include <glad/glad.h>
+#endif
 
 #include "Platform.h"
 
@@ -33,6 +37,7 @@
 // pls make the type names follow the same capitalization as their
 // matching function names, so this is more convenient to deal with
 
+#ifndef __SWITCH__
 #define DECLPROC(type, name)  \
     PFN##type##PROC name ;
 
@@ -43,6 +48,15 @@
     name = (PFN##type##PROC)Platform::GL_GetProcAddress(#name); \
     if (!name) { printf("OpenGL: " #name " not found\n"); return false; }
 
+#else
+
+// everythings's handled by glad
+
+#define DECLPROC(type, name)
+#define DECLPROC_EXT(type, name)
+#define LOADPROC(type, name)
+
+#endif
 
 // if you need more OpenGL functions, add them to the macronator here
 // TODO: handle conditionally loading certain functions for different GL versions

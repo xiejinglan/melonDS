@@ -218,6 +218,13 @@ enum
     tk_Count
 };
 
+// kitchen sink...
+enum
+{
+    misc_NothingSpecial = 0,
+    misc_WriteMemory
+};
+
 enum
 {
     flag_N = 1 << 3,
@@ -236,6 +243,7 @@ enum
 struct Info
 {
     u16 DstRegs, SrcRegs;
+    u16 NotStrictlyNeeded;
     u16 Kind;
 
     u8 SpecialKind;

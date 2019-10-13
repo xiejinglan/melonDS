@@ -36,7 +36,7 @@ detect_architecture("__i386__" x86)
 detect_architecture("__arm__" ARM)
 detect_architecture("__aarch64__" ARM64)
 
-if (ARCHITECTURE STREQUAL x86_64)
+if (ARCHITECTURE STREQUAL x86_64 OR ARCHITECTURE STREQUAL ARM64)
 	option(ENABLE_JIT "Enable x64 JIT recompiler" ON)
 endif()
 
@@ -58,11 +58,15 @@ add_compile_options(-fno-pic)
 add_link_options(-no-pie)
 
 option(BUILD_LIBUI "Build libui frontend" ON)
+option(BUILD_SWITCH "Build switch fronted" OFF)
 
 add_subdirectory(src)
 
 if (BUILD_LIBUI)
 	add_subdirectory(src/libui_sdl)
+endif()
+if (BUILD_SWITCH)
+    add_subdirectory(src/switch)
 endif()
 
 configure_file(

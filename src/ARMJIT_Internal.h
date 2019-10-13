@@ -15,7 +15,8 @@ enum
 {
 	branch_IdleBranch = 1 << 0,
 	branch_FollowCondTaken = 1 << 1,
-	branch_FollowCondNotTaken = 1 << 2
+	branch_FollowCondNotTaken = 1 << 2,
+	branch_Return = 1 << 3
 };
 
 struct FetchedInstr
@@ -43,7 +44,7 @@ struct FetchedInstr
 
     u8 CodeCycles;
 	u8 DataCycles;
-	u8 DataRegion;
+	u32 DataRegion;
 
     ARMInstrInfo::Info Info;
 };

@@ -2,6 +2,7 @@ project(core)
 
 set (CMAKE_CXX_STANDARD 14)
 
+
 add_library(core STATIC
 	ARM.cpp
 	ARMInterpreter.cpp
@@ -32,20 +33,38 @@ add_library(core STATIC
 if (ENABLE_JIT)
 	target_sources(core PRIVATE
 		ARMJIT.cpp
-		ARMJIT_x64/ARMJIT_Compiler.cpp
-		ARMJIT_x64/ARMJIT_ALU.cpp
-		ARMJIT_x64/ARMJIT_LoadStore.cpp
-		ARMJIT_x64/ARMJIT_Branch.cpp
 
 		dolphin/CommonFuncs.cpp
-		dolphin/x64ABI.cpp
-		dolphin/x64CPUDetect.cpp
-		dolphin/x64Emitter.cpp
+		
 	)
+
+	if (ARCHITECTURE STREQUAL x86_64)
+		target_sources(core PRIVATE
+			dolphin/x64ABI.cpp
+			dolphin/x64CPUDetect.cpp
+			dolphin/x64Emitter.cpp
+
+			ARMJIT_x64/ARMJIT_Compiler.cpp
+			ARMJIT_x64/ARMJIT_ALU.cpp
+			ARMJIT_x64/ARMJIT_LoadStore.cpp
+			ARMJIT_x64/ARMJIT_Branch.cpp
+		)
+	endif()
+	if (ARCHITECTURE STREQUAL ARM64)
+		target_sources(core PRIVATE
+			dolphin/Arm64Emitter.cpp
+			dolphin/MathUtil.cpp
+
+			ARMJIT_A64/ARMJIT_Compiler.cpp
+			ARMJIT_A64/ARMJIT_ALU.cpp
+			ARMJIT_A64/ARMJIT_LoadStore.cpp
+			ARMJIT_A64/ARMJIT_Branch.cpp
+		)
+	endif()
 endif()
 
 if (WIN32)
 	target_link_libraries(core ole32 comctl32 ws2_32 opengl32)
 else()
-	target_link_libraries(core GL EGL)
+	#target_link_libraries(core GL EGL)
 endif()

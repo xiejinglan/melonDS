@@ -404,6 +404,7 @@ JitBlockEntry Compiler::CompileBlock(ARM* cpu, bool thumb, FetchedInstr instrs[]
         R15 = CurInstr.Addr + (Thumb ? 4 : 8);
 
         Exit = i == instrsCount - 1 || (CurInstr.BranchFlags & branch_FollowCondNotTaken);
+        CodeRegion = R15 >> 24;
 
         CompileFunc comp = Thumb
             ? T_Comp[CurInstr.Info.Kind]

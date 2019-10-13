@@ -23,6 +23,9 @@
 #include "ARMJIT.h"
 #include "Config.h"
 
+#include <unordered_map>
+
+#include "switch/profiler.h"
 
 // instruction timing notes
 //
@@ -36,7 +39,8 @@
 //
 // MUL/MLA seems to take 1I on ARM9
 
-
+std::unordered_map<u32, u32> arm9BlockFrequency;
+std::unordered_map<u32, u32> arm7BlockFrequency;
 
 u32 ARM::ConditionTable[16] =
 {
@@ -569,6 +573,8 @@ void ARMv5::ExecuteJIT()
             return;
         }
 
+        //arm9BlockFrequency[instrAddr]++;
+
         ARMJIT::JitBlockEntry block = ARMJIT::LookUpBlock<0>(instrAddr);
         if (block)
             Cycles += block();
@@ -581,8 +587,8 @@ void ARMv5::ExecuteJIT()
         if (IRQ) TriggerIRQ();
         if (Halted)
         {
-            bool idleLoop = Halted & 0x20;
-            Halted &= ~0x20;
+            bool idleLoop = Halted & 0x100;
+            Halted &= ~0x100;
             if ((Halted == 1 || idleLoop) && NDS::ARM9Timestamp < NDS::ARM9Target)
             {
                 NDS::ARM9Timestamp = NDS::ARM9Target;
@@ -718,8 +724,8 @@ void ARMv4::ExecuteJIT()
         if (IRQ) TriggerIRQ();
         if (Halted)
         {
-            bool idleLoop = Halted & 0x20;
-            Halted &= ~0x20;
+            bool idleLoop = Halted & 0x100;
+            Halted &= ~0x100;
             if ((Halted == 1 || idleLoop) && NDS::ARM7Timestamp < NDS::ARM7Target)
             {
                 NDS::ARM7Timestamp = NDS::ARM7Target;

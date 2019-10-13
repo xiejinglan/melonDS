@@ -273,8 +273,6 @@ void Compiler::Comp_MemLoadLiteral(int size, int rd, u32 addr)
 
     if (Thumb || CurInstr.Cond() == 0xE)
         RegCache.PutLiteral(rd, val);
-
-    Comp_AddCycles_CDI();
 }
 
 void fault(u32 a, u32 b)
