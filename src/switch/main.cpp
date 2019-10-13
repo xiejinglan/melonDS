@@ -588,6 +588,8 @@ int main(int argc, char* argv[])
 
     gladLoadGL();
 
+    Config::Load();
+
     bool usePCV = R_SUCCEEDED(pcvInitialize());
     ClkrstSession clkrstSession;
     if (!usePCV)
@@ -602,6 +604,9 @@ int main(int argc, char* argv[])
     ImGuiStyle& style = ImGui::GetStyle();
     style.TouchExtraPadding = ImVec2(4, 4);
     style.ScaleAllSizes(2.f);
+
+    ImGuiIO& io = ImGui::GetIO();
+    io.FontGlobalScale = 1.5f;
 
     ImGui_ImplOpenGL3_Init();
 
@@ -647,8 +652,6 @@ int main(int argc, char* argv[])
 
     printf("melonDS " MELONDS_VERSION "\n");
     printf(MELONDS_URL "\n");
-
-    Config::Load();
 
     NDS::Init();
 
@@ -739,8 +742,29 @@ int main(int argc, char* argv[])
 
                 if (pos.px >= botX && pos.px < (botX + botWidth) && pos.py >= botY && pos.py < (botY + botHeight))
                 {
+                    int x, y;
+                    if (Config::ScreenRotation == 0) // 0
+                    {
+                        x = (pos.px - botX) * 256.0f / botWidth;
+                        y = (pos.py - botY) * 256.0f / botWidth;
+                    }
+                    else if (Config::ScreenRotation == 1) // 90
+                    {
+                        x =       (pos.py - botY) * 192.0f / botWidth;
+                        y = 192 - (pos.px - botX) * 192.0f / botWidth;
+                    }
+                    else if (Config::ScreenRotation == 2) // 180
+                    {
+                        x =       (pos.px - botX) * -256.0f / botWidth;
+                        y = 192 - (pos.py - botY) *  256.0f / botWidth;
+                    }
+                    else // 270
+                    {
+                        x = (pos.py - botY) * -192.0f / botWidth;
+                        y = (pos.px - botX) *  192.0f / botWidth;
+                    }
                     NDS::PressKey(16 + 6);
-                    NDS::TouchScreen((pos.px - botX) * (256.f / botWidth), (pos.py - botY) * (192.f / botHeight));
+                    NDS::TouchScreen(x, y);
                 }
                 else
                 {
@@ -762,7 +786,7 @@ int main(int argc, char* argv[])
         glViewport(0, 0, 1280, 720);
         glClearColor(0, 0, 0, 1);
         glClear(GL_COLOR_BUFFER_BIT);
-        
+                
         if (guiState == 1)
         {
             sectionTicksTotal = 0;
@@ -950,77 +974,77 @@ int main(int argc, char* argv[])
 
             if (ImGui::Begin("Display settings"))
             {
-                    bool displayDirty = false;
+                bool displayDirty = false;
 
-                    int newSizing = Config::ScreenSizing;
-                    ImGui::Combo("Screen Sizing", &newSizing, "Even\0Emphasise top\0Emphasise bottom\0");
-                    displayDirty |= newSizing != Config::ScreenSizing;
+                int newSizing = Config::ScreenSizing;
+                ImGui::Combo("Screen Sizing", &newSizing, "Even\0Emphasise top\0Emphasise bottom\0");
+                displayDirty |= newSizing != Config::ScreenSizing;
 
-                    int newRotation = Config::ScreenRotation;
-                    const char* rotations[] = {"0", "90", "180", "270"};
-                    ImGui::Combo("Screen Rotation", &newRotation, rotations, 4);
-                    displayDirty |= newRotation != Config::ScreenRotation;
+                int newRotation = Config::ScreenRotation;
+                const char* rotations[] = {"0", "90", "180", "270"};
+                ImGui::Combo("Screen Rotation", &newRotation, rotations, 4);
+                displayDirty |= newRotation != Config::ScreenRotation;
 
-                    int newGap = Config::ScreenGap;
-                    const char* screenGaps[] = {"0px", "1px", "8px", "64px", "90px", "128px"};
-                    ImGui::Combo("Screen Gap", &newGap, screenGaps, 6);
-                    displayDirty |= newGap != Config::ScreenGap;
+                int newGap = Config::ScreenGap;
+                const char* screenGaps[] = {"0px", "1px", "8px", "64px", "90px", "128px"};
+                ImGui::Combo("Screen Gap", &newGap, screenGaps, 6);
+                displayDirty |= newGap != Config::ScreenGap;
 
-                    int newLayout = Config::ScreenLayout;
-                    ImGui::Combo("Screen Layout", &newLayout, "Natural\0Vertical\0Horizontal\0");
-                    displayDirty |= newLayout != Config::ScreenLayout;
+                int newLayout = Config::ScreenLayout;
+                ImGui::Combo("Screen Layout", &newLayout, "Natural\0Vertical\0Horizontal\0");
+                displayDirty |= newLayout != Config::ScreenLayout;
 
-                    if (displayDirty)
-                    {
-                        Config::ScreenSizing = newSizing;
-                        Config::ScreenRotation = newRotation;
-                        Config::ScreenGap = newGap;
-                        Config::ScreenLayout = newLayout;
-
-                        updateScreenLayout(vtxBuffer);
-                    }
-
-                    bool newFiltering = Config::Filtering;
-                    ImGui::Checkbox("Filtering", &newFiltering);
-                    if (newFiltering != Config::Filtering)
-                    {
-                        glBindTexture(GL_TEXTURE_2D, screenTexture);
-                        GLenum glFilter = newFiltering ? GL_LINEAR : GL_NEAREST;
-                        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, glFilter);
-                        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, glFilter);
-                        glBindTexture(GL_TEXTURE_2D, 0);
-                        Config::Filtering = newFiltering;
-                    }
-                    ImGui::End();
-                }
-
-                if (ImGui::Begin("Emusettings", NULL, ImGuiWindowFlags_AlwaysAutoResize))
+                if (displayDirty)
                 {
-                    if (ImGui::Button("Reset"))
-                    {
-                        NDS::LoadROM(romFullpath, romSramPath, true);
+                    Config::ScreenSizing = newSizing;
+                    Config::ScreenRotation = newRotation;
+                    Config::ScreenGap = newGap;
+                    Config::ScreenLayout = newLayout;
 
-                        if (perfRecord)
-                        {
-                            fseek(perfRecord, SEEK_SET, 0);
-                        }
-                    }
-                    if (ImGui::Button("Stop"))
-                    {
-                        if (perfRecord)
-                        {
-                            fclose(perfRecord);
-                            perfRecord = NULL;
-                        }
-                        guiState = 0;
-                    }
-                    if (guiState == 1 && ImGui::Button("Pause"))
-                        guiState = 2;
-                    if (guiState == 2 && ImGui::Button("Unpause"))
-                        guiState = 1;
-
-                    ImGui::End();
+                    updateScreenLayout(vtxBuffer);
                 }
+
+                bool newFiltering = Config::Filtering;
+                ImGui::Checkbox("Filtering", &newFiltering);
+                if (newFiltering != Config::Filtering)
+                {
+                    glBindTexture(GL_TEXTURE_2D, screenTexture);
+                    GLenum glFilter = newFiltering ? GL_LINEAR : GL_NEAREST;
+                    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, glFilter);
+                    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, glFilter);
+                    glBindTexture(GL_TEXTURE_2D, 0);
+                    Config::Filtering = newFiltering;
+                }
+                ImGui::End();
+            }
+
+            if (ImGui::Begin("Emusettings", NULL, ImGuiWindowFlags_AlwaysAutoResize))
+            {
+                if (ImGui::Button("Reset"))
+                {
+                    NDS::LoadROM(romFullpath, romSramPath, true);
+
+                    if (perfRecord)
+                    {
+                        fseek(perfRecord, SEEK_SET, 0);
+                    }
+                }
+                if (ImGui::Button("Stop"))
+                {
+                    if (perfRecord)
+                    {
+                        fclose(perfRecord);
+                        perfRecord = NULL;
+                    }
+                    guiState = 0;
+                }
+                if (guiState == 1 && ImGui::Button("Pause"))
+                    guiState = 2;
+                if (guiState == 2 && ImGui::Button("Unpause"))
+                    guiState = 1;
+
+                ImGui::End();
+            }
             }
         }
 
