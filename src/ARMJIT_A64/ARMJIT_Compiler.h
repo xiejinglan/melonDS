@@ -53,7 +53,7 @@ struct Op2
     bool ImmFits12Bit()
     { return IsImm && (Imm & 0xFFF == Imm); }
     bool IsZero()
-    { return (IsImm && !Imm) || Reg.Rm == Arm64Gen::WZR; }
+    { return IsImm && !Imm; }
 
     bool IsImm;
     union
