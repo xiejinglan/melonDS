@@ -123,13 +123,9 @@ void applyOverclock(bool usePCV, ClkrstSession* session, int setting)
 {
     const int clockSpeeds[] = { 1020000000, 1224000000, 1581000000, 1785000000 };
     if (usePCV)
-    {
         pcvSetClockRate(PcvModule_CpuBus, clockSpeeds[setting]);
-    }
     else
-    {
         clkrstSetClockRate(session, clockSpeeds[setting]);
-    }
 }
 
 float topX, topY, topWidth, topHeight, botX, botY, botWidth, botHeight;
@@ -590,13 +586,18 @@ int main(int argc, char* argv[])
 
     Config::Load();
 
-    bool usePCV = R_SUCCEEDED(pcvInitialize());
-    ClkrstSession clkrstSession;
-    if (!usePCV)
+    bool usePCV = hosversionBefore(8, 0, 0);
+    ClkrstSession cpuOverclockSession;
+    if (usePCV)
+    {
+        pcvInitialize();
+    }
+    else
     {
         clkrstInitialize();
-        clkrstOpenSession(&clkrstSession, PcvModuleId_CpuBus, 0);
+        clkrstOpenSession(&cpuOverclockSession, PcvModuleId_CpuBus, 0);
     }
+    applyOverclock(usePCV, &cpuOverclockSession, Config::SwitchOverclock);
 
     ImGui::CreateContext();
     ImGui::StyleColorsClassic();
@@ -918,7 +919,7 @@ int main(int argc, char* argv[])
                 ImGui::Combo("Overclock", &newOverclock, "1020 MHz\0" "1224 MHz\0" "1581 MHz\0" "1785 MHz\0");
                 if (newOverclock != Config::SwitchOverclock)
                 {
-                    applyOverclock(usePCV, &clkrstSession, newOverclock);
+                    applyOverclock(usePCV, &cpuOverclockSession, newOverclock);
                     Config::SwitchOverclock = newOverclock;
                 }
                 ImGui::SliderInt("Block size", &Config::JIT_MaxBlockSize, 1, 32);
@@ -1086,14 +1087,14 @@ int main(int argc, char* argv[])
 
     DeInitEGL();
 
-    applyOverclock(usePCV, &clkrstSession, 0);
+    applyOverclock(usePCV, &cpuOverclockSession, 0);
     if (usePCV)
     {
         pcvExit();
     }
     else
     {
-        clkrstCloseSession(&clkrstSession);
+        clkrstCloseSession(&cpuOverclockSession);
         clkrstExit();
     }
 

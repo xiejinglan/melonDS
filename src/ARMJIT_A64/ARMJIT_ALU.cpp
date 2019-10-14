@@ -266,15 +266,19 @@ void Compiler::Comp_Arithmetic(int op, bool S, ARM64Reg rd, ARM64Reg rn, Op2 op2
         }
         break;
     case 0x3: // RSB
-        if (op2.IsImm)
+        if (op2.IsZero())
+        {
+            op2 = Op2(WZR);
+        }
+        else if (op2.IsImm)
         {
             MOVI2R(W1, op2.Imm);
-            op2 = Op2(W1, ST_LSL, 0);
+            op2 = Op2(W1);
         }
         else if (op2.Reg.ShiftAmount != 0)
         {
             MOV(W1, op2.Reg.Rm, op2.ToArithOption());
-            op2 = Op2(W1, ST_LSL, 0);
+            op2 = Op2(W1);
         }
 
         if (S)
@@ -748,7 +752,7 @@ void Compiler::T_Comp_ALU()
         Comp_Compare(0x8, rd, Op2(rs));
         break;
     case 0x9:
-        Comp_Arithmetic(0x2, true, rd, WZR, Op2(rs));
+        Comp_Arithmetic(0x3, true, rd, rs, Op2(0));
         break;
     case 0xA:
         Comp_Compare(0xA, rd, Op2(rs));
