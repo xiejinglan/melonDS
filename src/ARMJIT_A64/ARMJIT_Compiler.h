@@ -52,7 +52,7 @@ struct Op2
     { return !IsImm && !Reg.ShiftAmount && Reg.ShiftType == Arm64Gen::ST_LSL; }
     bool ImmFits12Bit()
     { return IsImm && (Imm & 0xFFF == Imm); }
-    bool Zero()
+    bool IsZero()
     { return (IsImm && !Imm) || Reg.Rm == Arm64Gen::WZR; }
 
     bool IsImm;
