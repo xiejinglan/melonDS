@@ -6,10 +6,6 @@
 
 #include "../dolphin/Arm64Emitter.h"
 
-#ifdef __SWITCH__
-#include "../switch/compat_switch.h"
-#endif
-
 #include "../ARMJIT_Internal.h"
 #include "../ARMJIT_RegisterCache.h"
 
@@ -227,7 +223,7 @@ public:
     bool IrregularCycles = false;
 
 #ifdef __SWITCH__
-    Jit jitMem;
+    void* JitRWStart;
 #endif
 };
 

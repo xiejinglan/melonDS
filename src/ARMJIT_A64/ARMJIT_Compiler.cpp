@@ -4,6 +4,10 @@
 
 #include "../ARMJIT_Internal.h"
 
+#ifdef __SWITCH__
+#include "../switch/compat_switch.h"
+#endif
+
 #include <malloc.h>
 
 using namespace Arm64Gen;
@@ -26,7 +30,9 @@ const ARM64Reg RegisterCache<Compiler, ARM64Reg>::NativeRegAllocOrder[] =
 template <>
 const int RegisterCache<Compiler, ARM64Reg>::NativeRegsAvailable = 8;
 
-const int JitMemSize = 8 * 1024 * 1024;
+const int JitMemSize = 16 * 1024 * 1024;
+
+volatile u8 CodeMemory[JitMemSize] __attribute__((aligned (4096), section(".text"))) = {NULL};
 
 void Compiler::MovePC()
 {
@@ -35,11 +41,16 @@ void Compiler::MovePC()
 
 Compiler::Compiler()
 {
-#ifdef __SWITCH__
-    assert(detectJitKernelPatch());
-    jitCreate(&jitMem, JitMemSize);
+#ifdef __SWITCH__    
+    JitRWStart = virtmemReserve(JitMemSize);
+    if (R_FAILED(svcMapProcessMemory(JitRWStart, envGetOwnProcessHandle(), (u64)CodeMemory, JitMemSize)))
+    {
+        virtmemFree(JitRWStart, JitMemSize);
+        JitRWStart = NULL;
+        printf("failed to create jit memory!!\n");
+    }
 
-    SetCodeBase((u8*)jitGetRwAddr(&jitMem), (u8*)jitGetRxAddr(&jitMem));
+    SetCodeBase((u8*)JitRWStart, (u8*)CodeMemory);
     JitMemUseableSize = JitMemSize;
     Reset();
 #endif
@@ -164,7 +175,11 @@ Compiler::Compiler()
 Compiler::~Compiler()
 {
 #ifdef __SWITCH__
-    jitClose(&jitMem);
+    if (JitRWStart != NULL)
+    {
+        svcUnmapProcessMemory(JitRWStart, envGetOwnProcessHandle(), (u64)CodeMemory, JitMemSize);
+        virtmemFree(JitRWStart, JitMemSize);
+    }
 #endif
 }
 
