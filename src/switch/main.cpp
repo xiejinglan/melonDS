@@ -759,6 +759,7 @@ int main(int argc, char* argv[])
     }
 
     uint32_t microphoneNoise = 314159265;
+    bool lidClosed = false;
 
     while (appletMainLoop())
     {
@@ -1111,6 +1112,8 @@ int main(int argc, char* argv[])
 
                 if (ImGui::Begin("Emusettings", NULL, ImGuiWindowFlags_AlwaysAutoResize))
                 {
+                    if (ImGui::Checkbox("Lid closed", &lidClosed))
+                        NDS::SetLidClosed(lidClosed);
                     if (ImGui::Button("Reset"))
                     {
                         NDS::LoadROM(romFullpath, romSramPath, true);
