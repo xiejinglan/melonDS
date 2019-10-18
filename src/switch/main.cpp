@@ -1014,6 +1014,7 @@ int main(int argc, char* argv[])
                 }
                 ImGui::SliderInt("Block size", &Config::JIT_MaxBlockSize, 1, 32);
                 ImGui::Checkbox("Branch optimisations", &Config::JIT_BrancheOptimisations);
+                ImGui::Checkbox("Literal optimisations", &Config::JIT_LiteralOptimisations);
             }
             ImGui::End();
 

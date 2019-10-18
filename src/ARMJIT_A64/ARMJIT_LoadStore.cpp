@@ -1,5 +1,7 @@
 #include "ARMJIT_Compiler.h"
 
+#include "../Config.h"
+
 using namespace Arm64Gen;
 
 namespace ARMJIT
@@ -308,20 +310,18 @@ void Compiler::Comp_MemLoadLiteral(int size, bool signExtend, int rd, u32 addr)
 
 void Compiler::Comp_MemAccess(int rd, int rn, Op2 offset, int size, int flags)
 {
-    IrregularCycles = true;
-
-    if (flags & memop_Store)
-        Comp_AddCycles_CD();
-    else
-        Comp_AddCycles_CDI();
-
     u32 addressMask = ~0;
     if (size == 32)
         addressMask = ~3;
     if (size == 16)
         addressMask = ~1;
+    
+    if (flags & memop_Store)
+        Comp_AddCycles_CD();
+    else
+        Comp_AddCycles_CDI();
 
-    if (rd != 15 && rn == 15 && offset.IsImm && !(flags&(memop_Store|memop_Writeback|memop_Post)))
+    if (Config::JIT_LiteralOptimisations && rd != 15 && rn == 15 && offset.IsImm && !(flags&(memop_Store|memop_Writeback|memop_Post)))
     {
         Comp_MemLoadLiteral(size, flags & memop_SignExtend, rd, R15 + offset.Imm * ((flags & memop_SubtractOffset) ? -1 : 1));
     }
@@ -337,7 +337,7 @@ void Compiler::Comp_MemAccess(int rd, int rn, Op2 offset, int size, int flags)
             ? MemFunc9[size >> 4][!!(flags & memop_Store)]
             : MemFunc7[size >> 4][!!((flags & memop_Store))];
 
-        if ((rd != 15 || (flags & memop_Store)) && offset.IsImm && RegCache.IsLiteral(rn))
+        if (Config::JIT_LiteralOptimisations && (rd != 15 || (flags & memop_Store)) && offset.IsImm && RegCache.IsLiteral(rn))
         {
             u32 addr = RegCache.LiteralValues[rn] + offset.Imm * ((flags & memop_SubtractOffset) ? -1 : 1);
 
@@ -429,9 +429,6 @@ void Compiler::Comp_MemAccess(int rd, int rn, Op2 offset, int size, int flags)
                 ANDI2R(rdMapped, W0, 3);
             if (size > 8)
                 ANDI2R(W0, W0, addressMask);
-        }
-        if (Num == 0)
-        {
         }
         QuickCallFunction(X2, memFunc);
         if (!(flags & memop_Store))
@@ -584,8 +581,17 @@ void Compiler::T_Comp_LoadPCRel()
 {
     u32 addr = (R15 & ~0x2) + ((CurInstr.Instr & 0xFF) << 2);
 
-    Comp_MemLoadLiteral(32, false, CurInstr.T_Reg(8), addr);
-    Comp_AddCycles_CDI();
+    if (Config::JIT_LiteralOptimisations)
+    {
+        Comp_MemLoadLiteral(32, false, CurInstr.T_Reg(8), addr);
+        Comp_AddCycles_CDI();
+    }
+    else
+    {
+        bool negative = addr < R15;
+        u32 abs = negative ? R15 - addr : addr - R15;
+        Comp_MemAccess(CurInstr.T_Reg(8), 15, Op2(abs), 32, negative ? memop_SubtractOffset : 0);
+    }
 }
 
 void Compiler::T_Comp_MemSPRel()

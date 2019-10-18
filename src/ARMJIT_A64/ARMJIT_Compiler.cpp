@@ -12,6 +12,8 @@
 
 using namespace Arm64Gen;
 
+extern char __start__;
+
 namespace ARMJIT
 {
 
@@ -32,8 +34,6 @@ const int RegisterCache<Compiler, ARM64Reg>::NativeRegsAvailable = 8;
 
 const int JitMemSize = 16 * 1024 * 1024;
 
-volatile u8 CodeMemory[JitMemSize] __attribute__((aligned (4096), section(".text"))) = {NULL};
-
 void Compiler::MovePC()
 {
     ADD(MapReg(15), MapReg(15), Thumb ? 2 : 4);
@@ -41,16 +41,35 @@ void Compiler::MovePC()
 
 Compiler::Compiler()
 {
-#ifdef __SWITCH__    
+#ifdef __SWITCH__
+    JitRWBase = memalign(0x1000, JitMemSize);
+
+    JitRXStart = (u8*)&__start__ - JitMemSize - 0x1000;
     JitRWStart = virtmemReserve(JitMemSize);
-    if (R_FAILED(svcMapProcessMemory(JitRWStart, envGetOwnProcessHandle(), (u64)CodeMemory, JitMemSize)))
+    MemoryInfo info = {0};
+    u32 pageInfo = {0};
+    int i = 0;
+    while (JitRXStart != NULL)
     {
-        virtmemFree(JitRWStart, JitMemSize);
-        JitRWStart = NULL;
-        printf("failed to create jit memory!!\n");
+        svcQueryMemory(&info, &pageInfo, (u64)JitRXStart);
+        if (info.type != MemType_Unmapped)
+            JitRXStart = (void*)((u8*)info.addr - JitMemSize - 0x1000);
+        else
+            break;
+        if (i++ > 8)
+        {
+            printf("couldn't find unmapped place for jit memory\n");
+            JitRXStart = NULL;
+        }
     }
 
-    SetCodeBase((u8*)JitRWStart, (u8*)CodeMemory);
+    assert(JitRXStart != NULL);
+
+    assert(R_SUCCEEDED(svcMapProcessCodeMemory(envGetOwnProcessHandle(), (u64)JitRXStart, (u64)JitRWBase, JitMemSize)));
+    assert(R_SUCCEEDED(svcSetProcessMemoryPermission(envGetOwnProcessHandle(), (u64)JitRXStart, JitMemSize, Perm_Rx)));
+    assert(R_SUCCEEDED(svcMapProcessMemory(JitRWStart, envGetOwnProcessHandle(), (u64)JitRXStart, JitMemSize)));
+
+    SetCodeBase((u8*)JitRWStart, (u8*)JitRXStart);
     JitMemUseableSize = JitMemSize;
     Reset();
 #endif
@@ -168,6 +187,8 @@ Compiler::Compiler()
         RET();
     }
 
+    //FlushIcache();
+
     JitMemUseableSize -= GetCodeOffset();
     SetCodeBase((u8*)GetRWPtr(), (u8*)GetRXPtr());
 }
@@ -177,8 +198,10 @@ Compiler::~Compiler()
 #ifdef __SWITCH__
     if (JitRWStart != NULL)
     {
-        svcUnmapProcessMemory(JitRWStart, envGetOwnProcessHandle(), (u64)CodeMemory, JitMemSize);
+        assert(R_SUCCEEDED(svcUnmapProcessMemory(JitRWStart, envGetOwnProcessHandle(), (u64)JitRXStart, JitMemSize)));
         virtmemFree(JitRWStart, JitMemSize);
+        assert(R_SUCCEEDED(svcUnmapProcessCodeMemory(envGetOwnProcessHandle(), (u64)JitRXStart, (u64)JitRWBase, JitMemSize)));
+        free(JitRWBase);
     }
 #endif
 }
@@ -364,7 +387,7 @@ void Compiler::Comp_BranchSpecialBehaviour()
     if (CurInstr.BranchFlags & branch_IdleBranch)
     {
         MOVI2R(W0, 1);
-        STRB(INDEX_UNSIGNED, W0, RCPU, offsetof(ARM, Halted) + 1);
+        STRB(INDEX_UNSIGNED, W0, RCPU, offsetof(ARM, IdleLoop));
     }
 
     if (CurInstr.BranchFlags & branch_FollowCondNotTaken)

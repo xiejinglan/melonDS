@@ -223,7 +223,9 @@ public:
     bool IrregularCycles = false;
 
 #ifdef __SWITCH__
+    void* JitRWBase;
     void* JitRWStart;
+    void* JitRXStart;
 #endif
 };
 
