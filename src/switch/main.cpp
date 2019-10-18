@@ -48,6 +48,8 @@ char LastROMFolder[512];
 
 int SwitchOverclock;
 
+int DirectBoot;
+
 ConfigEntry PlatformConfigFile[] =
 {
     {"ScreenRotation", 0, &ScreenRotation, 0, NULL, 0},
@@ -59,6 +61,8 @@ ConfigEntry PlatformConfigFile[] =
     {"LastROMFolder", 1, LastROMFolder, 0, (char*)"sdmc:/", 511},
 
     {"SwitchOverclock", 0, &SwitchOverclock, 0, NULL, 0},
+
+    {"DirectBoot",   0, &DirectBoot,     1, NULL, 0},
 
     {"", -1, NULL, 0, NULL, 0}
 };
@@ -479,74 +483,106 @@ const u32 keyMappings[] = {
 };
 
 static bool running = true;
-static AudioOutBuffer* audioReleasedBuffer;
-static s16* audioData[2];
-static AudioOutBuffer audioBuffers[2];
+static bool paused = true;
+static void* audMemPool = NULL;
+static AudioDriver audDrv;
 
-void setupAudioBuffer()
+const int AudioSampleSize = 768 * 2 * sizeof(s16);
+
+void setupAudio()
 {
-    for (int i = 0; i < 2; i++)
+    static const AudioRendererConfig arConfig =
     {
-        int size = 1024 * 2 * sizeof(s16);
-        int alignedSize = (size + 0xFFF) & ~0xFFF;
-        audioData[i] = (s16*)memalign(0x1000, size);
-        memset(audioData[i], 0, alignedSize);
-        audioBuffers[i].next = NULL;
-        audioBuffers[i].buffer = audioData[i];
-        audioBuffers[i].buffer_size = alignedSize;
-        audioBuffers[i].data_size = size;
-        audioBuffers[i].data_offset = 0;
-        audoutAppendAudioOutBuffer(&audioBuffers[i]);
-    }
-}
+        .output_rate     = AudioRendererOutputRate_48kHz,
+        .num_voices      = 4,
+        .num_effects     = 0,
+        .num_sinks       = 1,
+        .num_mix_objs    = 1,
+        .num_mix_buffers = 2,
+    };
 
-void fillAudioBuffer()
-{
-    // 1024 samples is equal to approximately 700 at the original rate
-    s16 buf_in[700 * 2];
-    s16 *buf_out = (s16*)audioReleasedBuffer->buffer;
+    Result code;
+    if (!R_SUCCEEDED(code = audrenInitialize(&arConfig)))
+        printf("audren init failed! %d\n", code);
 
-    int num_in = SPU::ReadOutput(buf_in, 700);
+    if (!R_SUCCEEDED(code = audrvCreate(&audDrv, &arConfig, 2)))
+        printf("audrv create failed! %d\n", code);
 
-    int margin = 6;
-    if (num_in < 700 - margin)
-    {
-        int last = num_in - 1;
-        if (last < 0)
-            last = 0;
+    const int poolSize = (AudioSampleSize * 2 + (AUDREN_MEMPOOL_ALIGNMENT-1)) & ~(AUDREN_MEMPOOL_ALIGNMENT-1);
+    audMemPool = memalign(AUDREN_MEMPOOL_ALIGNMENT, poolSize);
 
-        for (int i = num_in; i < 700 - margin; i++)
-            ((u32*)buf_in)[i] = ((u32*)buf_in)[last];
+    int mpid = audrvMemPoolAdd(&audDrv, audMemPool, poolSize);
+    audrvMemPoolAttach(&audDrv, mpid);
 
-        num_in = 700 - margin;
-    }
+    static const u8 sink_channels[] = { 0, 1 };
+    audrvDeviceSinkAdd(&audDrv, AUDREN_DEFAULT_DEVICE_NAME, 2, sink_channels);
 
-    float res_incr = (float)num_in / 1024;
-    float res_timer = 0;
-    int res_pos = 0;
+    audrvUpdate(&audDrv);
 
-    for (int i = 0; i < 1024; i++)
-    {
-        buf_out[i * 2]     = (buf_in[res_pos * 2]     * 4 * 64) >> 8;
-        buf_out[i * 2 + 1] = (buf_in[res_pos * 2 + 1] * 4 * 64) >> 8;
+    if (!R_SUCCEEDED(code = audrenStartAudioRenderer()))
+        printf("audrv create failed! %d\n", code);
 
-        res_timer += res_incr;
-        while (res_timer >= 1)
-        {
-            res_timer--;
-            res_pos++;
-        }
-    }
+    if (!audrvVoiceInit(&audDrv, 0, 2, PcmFormat_Int16, 32823)) // cheating
+        printf("failed to create voice\n");
+
+    audrvVoiceSetDestinationMix(&audDrv, 0, AUDREN_FINAL_MIX_ID);
+    audrvVoiceSetMixFactor(&audDrv, 0, 1.0f, 0, 0);
+    audrvVoiceSetMixFactor(&audDrv, 0, 1.0f, 0, 1);
+    audrvVoiceStart(&audDrv, 0);
 }
 
 void audioOutput(void *args)
 {
+    AudioDriverWaveBuf buffers[2];
+    memset(&buffers[0], 0, sizeof(AudioDriverWaveBuf) * 2);
+    for (int i = 0; i < 2; i++)
+    {
+        buffers[i].data_pcm16 = (s16*)audMemPool;
+        buffers[i].size = AudioSampleSize;
+        buffers[i].start_sample_offset = i * AudioSampleSize / 2 / sizeof(s16);
+        buffers[i].end_sample_offset = buffers[i].start_sample_offset + AudioSampleSize / 2 / sizeof(s16);
+    }
+
     while (running)
     {
-        u32 count;
-        audoutWaitPlayFinish(&audioReleasedBuffer, &count, U64_MAX);
-        fillAudioBuffer();
-        audoutAppendAudioOutBuffer(audioReleasedBuffer);
+        while (paused && running)
+        {
+            svcSleepThread(17000000); // a bit more than a frame...
+        }
+        while (!paused && running)
+        {
+            AudioDriverWaveBuf* refillBuf = NULL;
+            for (int i = 0; i < 2; i++)
+            {
+                if (buffers[i].state == AudioDriverWaveBufState_Free || buffers[i].state == AudioDriverWaveBufState_Done)
+                {
+                    refillBuf = &buffers[i];
+                    break;
+                }
+            }
+            
+            if (refillBuf)
+            {
+                s16* data = (s16*)audMemPool + refillBuf->start_sample_offset * 2;
+                
+                int nSamples = 0;
+                while (running && !(nSamples = SPU::ReadOutput(data, 768)))
+                    svcSleepThread(1000);
+                
+                u32 last = ((u32*)data)[nSamples - 1];
+                while (nSamples < 768)
+                    ((u32*)data)[nSamples++] = last;
+
+                armDCacheFlush(data, nSamples * 2 * sizeof(u16));
+                refillBuf->end_sample_offset = refillBuf->start_sample_offset + nSamples;
+
+                audrvVoiceAddWaveBuf(&audDrv, 0, refillBuf);
+                audrvVoiceStart(&audDrv, 0);
+            }
+
+            audrvUpdate(&audDrv);
+            audrenWaitFrame();
+        }
     }
 }
 
@@ -579,6 +615,8 @@ int main(int argc, char* argv[])
 
     /*socketInitializeDefault();
     int nxlinkSocket = nxlinkStdio();*/
+    //GDBStub_Init();
+    //GDBStub_Breakpoint();
 
     InitEGL(nwindowGetDefault());
 
@@ -637,19 +675,14 @@ int main(int argc, char* argv[])
     GLuint screenTexture;
     glGenTextures(1, &screenTexture);
     glBindTexture(GL_TEXTURE_2D, screenTexture);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, Config::Filtering ? GL_LINEAR : GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, Config::Filtering ? GL_LINEAR : GL_NEAREST);
     glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGBA8, 256, 192 * 2);
 
     Thread audioThread;
-    audoutInitialize();
-    audoutStartAudioOut();
-    setupAudioBuffer();
+    setupAudio();
     threadCreate(&audioThread, audioOutput, NULL, 0x8000, 0x30, 2);
     threadStart(&audioThread);
-
-    //pcvInitialize();
-    //pcvSetClockRate(PcvModule_CpuBus, 1785000000);
 
     printf("melonDS " MELONDS_VERSION "\n");
     printf(MELONDS_URL "\n");
@@ -671,6 +704,20 @@ int main(int argc, char* argv[])
     float frametimeSum2 = 0.f;
     float frametimeMax = 0.f;
     float frametimeStddev = 0.f;
+
+    const char* requiredFiles[] = {"romlist.bin", "bios9.bin", "bios7.bin", "firmware.bin"};
+    int filesReady = 0;
+    {
+        FILE* f;
+        for (int i = 0; i < sizeof(requiredFiles)/sizeof(requiredFiles[0]); i++)
+        {
+            if ((f = Platform::OpenLocalFile(requiredFiles[i], "rb")))
+            {
+                fclose(f);
+                filesReady |= 1 << i;
+            }
+        }
+    }
 
     bool showGui = true;
 
@@ -711,6 +758,8 @@ int main(int argc, char* argv[])
         closedir(dir);
     }
 
+    uint32_t microphoneNoise = 314159265;
+
     while (appletMainLoop())
     {
         hidScanInput();
@@ -724,6 +773,24 @@ int main(int argc, char* argv[])
                 NDS::PressKey(i > 9 ? i + 6 : i);
             if (keysUp & keyMappings[i])
                 NDS::ReleaseKey(i > 9 ? i + 6 : i);
+        }
+
+        if (keysDown & KEY_LSTICK)
+        {
+            s16 input[1440];
+            for (int i = 0; i < 1440; i++)
+            {
+                microphoneNoise ^= microphoneNoise << 13;
+                microphoneNoise ^= microphoneNoise >> 17;
+                microphoneNoise ^= microphoneNoise << 5;
+                input[i] = microphoneNoise & 0xFFFF;
+            }
+            NDS::MicInputFrame(input, 1440);
+        }
+        if (keysUp & KEY_LSTICK)
+        {
+            s16 input[1440] = {0};
+            NDS::MicInputFrame(input, 1440);
         }
 
         if (keysDown & KEY_ZL)
@@ -741,7 +808,7 @@ int main(int argc, char* argv[])
                 io.MousePos = ImVec2((float)pos.px, (float)pos.py);
                 io.MouseDown[0] = true;
 
-                if (pos.px >= botX && pos.px < (botX + botWidth) && pos.py >= botY && pos.py < (botY + botHeight))
+                if (!io.WantCaptureMouse && pos.px >= botX && pos.px < (botX + botWidth) && pos.py >= botY && pos.py < (botY + botHeight))
                 {
                     int x, y;
                     if (Config::ScreenRotation == 0) // 0
@@ -787,7 +854,9 @@ int main(int argc, char* argv[])
         glViewport(0, 0, 1280, 720);
         glClearColor(0, 0, 0, 1);
         glClear(GL_COLOR_BUFFER_BIT);
-                
+
+        paused = guiState != 1;
+
         if (guiState == 1)
         {
             sectionTicksTotal = 0;
@@ -865,6 +934,22 @@ int main(int argc, char* argv[])
                 printf("%x hit %dx\n", jitFreqResults[i].first, jitFreqResults[i].second);
             }*/
         }
+        else if (filesReady != 0xF)
+        {
+            if (ImGui::Begin("Files missing!"))
+            {
+                ImGui::TextColored(ImVec4(1.f, 1.f, 0.f, 1.f), "Some files couldn't. Please make sure they're at the exact place:");
+                for (int i = 0; i < sizeof(requiredFiles)/sizeof(requiredFiles[0]); i++)
+                {
+                    if (!(filesReady & (1 << i)))
+                        ImGui::Text("File: /melonds/%s is missing", requiredFiles[i]);
+                }
+                if (ImGui::Button("Exit"))
+                    break;
+                
+            }
+            ImGui::End();
+        }
         else if (guiState == 0)
         {
             if (ImGui::Begin("Select rom..."))
@@ -896,7 +981,7 @@ int main(int argc, char* argv[])
                     romSramPath[romFullpathLen + 2] = 'a';
                     romSramPath[romFullpathLen + 3] = 'v';
                     romSramPath[romFullpathLen + 4] = '\0';
-                    NDS::LoadROM(romFullpath, romSramPath, true);
+                    NDS::LoadROM(romFullpath, romSramPath, Config::DirectBoot);
 
                     if (perfRecordMode == 1)
                         perfRecord = fopen("melonds_perf", "wb");
@@ -912,9 +997,14 @@ int main(int argc, char* argv[])
                 }
 
             }
+            ImGui::End();
 
             if (ImGui::Begin("Settings"))
             {
+                bool directBoot = Config::DirectBoot;
+                ImGui::Checkbox("Boot games directly", &directBoot);
+                Config::DirectBoot = directBoot;
+
                 int newOverclock = Config::SwitchOverclock;
                 ImGui::Combo("Overclock", &newOverclock, "1020 MHz\0" "1224 MHz\0" "1581 MHz\0" "1785 MHz\0");
                 if (newOverclock != Config::SwitchOverclock)
@@ -924,13 +1014,12 @@ int main(int argc, char* argv[])
                 }
                 ImGui::SliderInt("Block size", &Config::JIT_MaxBlockSize, 1, 32);
                 ImGui::Checkbox("Branch optimisations", &Config::JIT_BrancheOptimisations);
-                ImGui::End();
             }
+            ImGui::End();
 
             if (ImGui::Begin("Profiling"))
             {
                 ImGui::Combo("Mode", &perfRecordMode, "No comparision\0Write frametimes\0Compare frametimes\0");
-                ImGui::End();
             }
             ImGui::End();
         }
@@ -956,96 +1045,96 @@ int main(int argc, char* argv[])
 
             if (showGui)
             {
-            if (ImGui::Begin("Perf", NULL, ImGuiWindowFlags_AlwaysAutoResize))
-            {
-                ImGui::Text("frametime avg1: %fms avg2: %fms std dev: +/%fms max: %fms", frametimeSum, frametimeSum2, frametimeStddev, frametimeMax);
-                ImGui::PlotHistogram("Frametime history", frametimeHistogram, 60, 0, NULL, 0.f, 25.f, ImVec2(0, 50.f));
-                
-                ImGui::PlotHistogram("Custom counter", customTimeHistogram, 60, 0, NULL, 0.f, 25.f, ImVec2(0, 50.f));
-
-                if (perfRecordMode == 2)
+                if (ImGui::Begin("Perf", NULL, ImGuiWindowFlags_AlwaysAutoResize))
                 {
-                    ImGui::PlotHistogram("Frametime diff", frametimeDiffHistogram, 60, 0, NULL, -25.f, 25.f, ImVec2(0, 50.f));
-                }
+                    ImGui::Text("frametime avg1: %fms avg2: %fms std dev: +/%fms max: %fms", frametimeSum, frametimeSum2, frametimeStddev, frametimeMax);
+                    ImGui::PlotHistogram("Frametime history", frametimeHistogram, 60, 0, NULL, 0.f, 25.f, ImVec2(0, 50.f));
+                    
+                    ImGui::PlotHistogram("Custom counter", customTimeHistogram, 60, 0, NULL, 0.f, 25.f, ImVec2(0, 50.f));
 
-                profiler::Render();
-
-                ImGui::End();
-            }
-
-            if (ImGui::Begin("Display settings"))
-            {
-                bool displayDirty = false;
-
-                int newSizing = Config::ScreenSizing;
-                ImGui::Combo("Screen Sizing", &newSizing, "Even\0Emphasise top\0Emphasise bottom\0");
-                displayDirty |= newSizing != Config::ScreenSizing;
-
-                int newRotation = Config::ScreenRotation;
-                const char* rotations[] = {"0", "90", "180", "270"};
-                ImGui::Combo("Screen Rotation", &newRotation, rotations, 4);
-                displayDirty |= newRotation != Config::ScreenRotation;
-
-                int newGap = Config::ScreenGap;
-                const char* screenGaps[] = {"0px", "1px", "8px", "64px", "90px", "128px"};
-                ImGui::Combo("Screen Gap", &newGap, screenGaps, 6);
-                displayDirty |= newGap != Config::ScreenGap;
-
-                int newLayout = Config::ScreenLayout;
-                ImGui::Combo("Screen Layout", &newLayout, "Natural\0Vertical\0Horizontal\0");
-                displayDirty |= newLayout != Config::ScreenLayout;
-
-                if (displayDirty)
-                {
-                    Config::ScreenSizing = newSizing;
-                    Config::ScreenRotation = newRotation;
-                    Config::ScreenGap = newGap;
-                    Config::ScreenLayout = newLayout;
-
-                    updateScreenLayout(vtxBuffer);
-                }
-
-                bool newFiltering = Config::Filtering;
-                ImGui::Checkbox("Filtering", &newFiltering);
-                if (newFiltering != Config::Filtering)
-                {
-                    glBindTexture(GL_TEXTURE_2D, screenTexture);
-                    GLenum glFilter = newFiltering ? GL_LINEAR : GL_NEAREST;
-                    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, glFilter);
-                    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, glFilter);
-                    glBindTexture(GL_TEXTURE_2D, 0);
-                    Config::Filtering = newFiltering;
-                }
-                ImGui::End();
-            }
-
-            if (ImGui::Begin("Emusettings", NULL, ImGuiWindowFlags_AlwaysAutoResize))
-            {
-                if (ImGui::Button("Reset"))
-                {
-                    NDS::LoadROM(romFullpath, romSramPath, true);
-
-                    if (perfRecord)
+                    if (perfRecordMode == 2)
                     {
-                        fseek(perfRecord, SEEK_SET, 0);
+                        ImGui::PlotHistogram("Frametime diff", frametimeDiffHistogram, 60, 0, NULL, -25.f, 25.f, ImVec2(0, 50.f));
+                    }
+
+                    profiler::Render();
+
+                }
+                ImGui::End();
+
+                if (ImGui::Begin("Display settings"))
+                {
+                    bool displayDirty = false;
+
+                    int newSizing = Config::ScreenSizing;
+                    ImGui::Combo("Screen Sizing", &newSizing, "Even\0Emphasise top\0Emphasise bottom\0");
+                    displayDirty |= newSizing != Config::ScreenSizing;
+
+                    int newRotation = Config::ScreenRotation;
+                    const char* rotations[] = {"0", "90", "180", "270"};
+                    ImGui::Combo("Screen Rotation", &newRotation, rotations, 4);
+                    displayDirty |= newRotation != Config::ScreenRotation;
+
+                    int newGap = Config::ScreenGap;
+                    const char* screenGaps[] = {"0px", "1px", "8px", "64px", "90px", "128px"};
+                    ImGui::Combo("Screen Gap", &newGap, screenGaps, 6);
+                    displayDirty |= newGap != Config::ScreenGap;
+
+                    int newLayout = Config::ScreenLayout;
+                    ImGui::Combo("Screen Layout", &newLayout, "Natural\0Vertical\0Horizontal\0");
+                    displayDirty |= newLayout != Config::ScreenLayout;
+
+                    if (displayDirty)
+                    {
+                        Config::ScreenSizing = newSizing;
+                        Config::ScreenRotation = newRotation;
+                        Config::ScreenGap = newGap;
+                        Config::ScreenLayout = newLayout;
+
+                        updateScreenLayout(vtxBuffer);
+                    }
+
+                    bool newFiltering = Config::Filtering;
+                    ImGui::Checkbox("Filtering", &newFiltering);
+                    if (newFiltering != Config::Filtering)
+                    {
+                        glBindTexture(GL_TEXTURE_2D, screenTexture);
+                        GLenum glFilter = newFiltering ? GL_LINEAR : GL_NEAREST;
+                        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, glFilter);
+                        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, glFilter);
+                        glBindTexture(GL_TEXTURE_2D, 0);
+                        Config::Filtering = newFiltering;
                     }
                 }
-                if (ImGui::Button("Stop"))
-                {
-                    if (perfRecord)
-                    {
-                        fclose(perfRecord);
-                        perfRecord = NULL;
-                    }
-                    guiState = 0;
-                }
-                if (guiState == 1 && ImGui::Button("Pause"))
-                    guiState = 2;
-                if (guiState == 2 && ImGui::Button("Unpause"))
-                    guiState = 1;
-
                 ImGui::End();
-            }
+
+                if (ImGui::Begin("Emusettings", NULL, ImGuiWindowFlags_AlwaysAutoResize))
+                {
+                    if (ImGui::Button("Reset"))
+                    {
+                        NDS::LoadROM(romFullpath, romSramPath, true);
+
+                        if (perfRecord)
+                        {
+                            fseek(perfRecord, SEEK_SET, 0);
+                        }
+                    }
+                    if (ImGui::Button("Stop"))
+                    {
+                        if (perfRecord)
+                        {
+                            fclose(perfRecord);
+                            perfRecord = NULL;
+                        }
+                        guiState = 0;
+                    }
+                    if (guiState == 1 && ImGui::Button("Pause"))
+                        guiState = 2;
+                    if (guiState == 2 && ImGui::Button("Unpause"))
+                        guiState = 1;
+
+                }
+                ImGui::End();
             }
         }
 
@@ -1077,10 +1166,11 @@ int main(int argc, char* argv[])
     running = false;
     threadWaitForExit(&audioThread);
     threadClose(&audioThread);
-    free(audioData[0]);
-    free(audioData[1]);
-    audoutStopAudioOut();
-    audoutExit();
+
+    audrvClose(&audDrv);
+    audrenExit();
+
+    free(audMemPool);
 
     ImGui_ImplOpenGL3_Shutdown();
     ImGui::DestroyContext();
@@ -1100,6 +1190,7 @@ int main(int argc, char* argv[])
 
     //close(nxlinkSocket);
     //socketExit();
+    //GDBStub_Shutdown();
 
     return 0;
 }

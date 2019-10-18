@@ -54,7 +54,7 @@ if(ENABLE_LTO)
 	add_compile_options(-O3 -flto)
 endif()
 
-add_compile_options(-fno-pic)
+#add_compile_options(-fno-pic)
 add_link_options(-no-pie)
 
 option(BUILD_LIBUI "Build libui frontend" ON)
