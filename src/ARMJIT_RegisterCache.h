@@ -113,6 +113,12 @@ public:
 	void Prepare(bool thumb, int i)
     {
         FetchedInstr instr = Instrs[i];
+<<<<<<< HEAD
+=======
+
+        if (LoadedRegs & (1 << 15))
+            UnloadRegister(15);
+>>>>>>> remotes/origin/generic_jit
 
         BitSet16 invalidedLiterals(LiteralsLoaded & instr.Info.DstRegs);
         for (int reg : invalidedLiterals)
@@ -176,8 +182,25 @@ public:
                 needValueLoaded = BitSet16(instr.Info.SrcRegs);
             for (int reg : needToBeLoaded)
                 LoadRegister(reg, needValueLoaded[reg]);
+        } 
+        {
+            BitSet16 loadedSet(LoadedRegs);
+            BitSet16 loadRegs(instr.Info.NotStrictlyNeeded & futureNeeded & ~LoadedRegs);
+            if (loadRegs && loadedSet.Count() < NativeRegsAvailable)
+            {
+                int left = NativeRegsAvailable - loadedSet.Count();
+                for (int reg : loadRegs)
+                {
+                    if (left-- == 0)
+                        break;
+
+                    writeRegs |= (1 << reg) & instr.Info.DstRegs;
+                    LoadRegister(reg, !(thumb || instr.Cond() >= 0xE) || (1 << reg) & instr.Info.SrcRegs);
+                }
+            }
         }
 
+<<<<<<< HEAD
         {
             BitSet16 loadedSet(LoadedRegs);
             BitSet16 loadRegs(instr.Info.NotStrictlyNeeded & futureNeeded & ~LoadedRegs);
@@ -195,6 +218,8 @@ public:
             }
         }
 
+=======
+>>>>>>> remotes/origin/generic_jit
         DirtyRegs |= writeRegs & ~(1 << 15);
     }
 

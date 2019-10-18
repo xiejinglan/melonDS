@@ -237,13 +237,13 @@ enum
 {
     special_NotSpecialAtAll = 0,
     special_WriteMem,
-    special_WaitForInterrupt
+    special_WaitForInterrupt,
+    special_LoadLiteral
 };
 
 struct Info
 {
-    u16 DstRegs, SrcRegs;
-    u16 NotStrictlyNeeded;
+    u16 DstRegs, SrcRegs, NotStrictlyNeeded;
     u16 Kind;
 
     u8 SpecialKind;
