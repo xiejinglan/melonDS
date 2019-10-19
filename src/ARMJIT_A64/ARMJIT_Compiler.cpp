@@ -65,9 +65,12 @@ Compiler::Compiler()
 
     assert(JitRXStart != NULL);
 
-    assert(R_SUCCEEDED(svcMapProcessCodeMemory(envGetOwnProcessHandle(), (u64)JitRXStart, (u64)JitRWBase, JitMemSize)));
-    assert(R_SUCCEEDED(svcSetProcessMemoryPermission(envGetOwnProcessHandle(), (u64)JitRXStart, JitMemSize, Perm_Rx)));
-    assert(R_SUCCEEDED(svcMapProcessMemory(JitRWStart, envGetOwnProcessHandle(), (u64)JitRXStart, JitMemSize)));
+    bool succeded = R_SUCCEEDED(svcMapProcessCodeMemory(envGetOwnProcessHandle(), (u64)JitRXStart, (u64)JitRWBase, JitMemSize));
+    assert(succeded);
+    succeded = R_SUCCEEDED(svcSetProcessMemoryPermission(envGetOwnProcessHandle(), (u64)JitRXStart, JitMemSize, Perm_Rx));
+    assert(succeded);
+    succeded = R_SUCCEEDED(svcMapProcessMemory(JitRWStart, envGetOwnProcessHandle(), (u64)JitRXStart, JitMemSize));
+    assert(succeded);
 
     SetCodeBase((u8*)JitRWStart, (u8*)JitRXStart);
     JitMemUseableSize = JitMemSize;
@@ -198,9 +201,11 @@ Compiler::~Compiler()
 #ifdef __SWITCH__
     if (JitRWStart != NULL)
     {
-        assert(R_SUCCEEDED(svcUnmapProcessMemory(JitRWStart, envGetOwnProcessHandle(), (u64)JitRXStart, JitMemSize)));
+        bool succeded = R_SUCCEEDED(svcUnmapProcessMemory(JitRWStart, envGetOwnProcessHandle(), (u64)JitRXStart, JitMemSize));
+        assert(succeded);
         virtmemFree(JitRWStart, JitMemSize);
-        assert(R_SUCCEEDED(svcUnmapProcessCodeMemory(envGetOwnProcessHandle(), (u64)JitRXStart, (u64)JitRWBase, JitMemSize)));
+        succeded = R_SUCCEEDED(svcUnmapProcessCodeMemory(envGetOwnProcessHandle(), (u64)JitRXStart, (u64)JitRWBase, JitMemSize));
+        assert(succeded);
         free(JitRWBase);
     }
 #endif
