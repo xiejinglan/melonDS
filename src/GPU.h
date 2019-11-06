@@ -66,9 +66,6 @@ extern u8* VRAMPtr_AOBJ[0x10];
 extern u8* VRAMPtr_BBG[0x8];
 extern u8* VRAMPtr_BOBJ[0x8];
 
-extern u8 VRAMFlat_ABG[512*1024];
-extern u8 VRAMFlat_BBG[128*1024];
-
 extern int FrontBuffer;
 extern u32* Framebuffer[2][2];
 
@@ -250,8 +247,6 @@ void WriteVRAM_ABG(u32 addr, T val)
 {
     u32 mask = VRAMMap_ABG[(addr >> 14) & 0x1F];
 
-    *(T*)&VRAMFlat_ABG[addr & 0x7FFFF] = val;
-
     if (mask & (1<<0)) *(T*)&VRAM_A[addr & 0x1FFFF] = val;
     if (mask & (1<<1)) *(T*)&VRAM_B[addr & 0x1FFFF] = val;
     if (mask & (1<<2)) *(T*)&VRAM_C[addr & 0x1FFFF] = val;
@@ -313,8 +308,6 @@ template<typename T>
 void WriteVRAM_BBG(u32 addr, T val)
 {
     u32 mask = VRAMMap_BBG[(addr >> 14) & 0x7];
-
-    *(T*)&VRAMFlat_BBG[addr & 0x1FFFF] = val;
 
     if (mask & (1<<2)) *(T*)&VRAM_C[addr & 0x1FFFF] = val;
     if (mask & (1<<7)) *(T*)&VRAM_H[addr & 0x7FFF] = val;
