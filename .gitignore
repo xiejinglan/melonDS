@@ -8,3 +8,4 @@ melon_grc.h
 cmake-build
 
 obj_release
+obj_gdb

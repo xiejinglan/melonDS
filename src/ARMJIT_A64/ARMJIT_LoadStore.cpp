@@ -12,6 +12,7 @@ namespace ARMJIT
 // W2 - code cycles
 void* Compiler::Gen_MemoryRoutine9(int size, bool store)
 {
+    AlignCode16();
     void* res = GetRXPtr();
 
     u32 addressMask;
@@ -144,6 +145,7 @@ void* Compiler::Gen_MemoryRoutine9(int size, bool store)
 */
 void* Compiler::Gen_MemoryRoutine9Seq(bool store, bool preinc)
 {
+    AlignCode16();
     void* res = GetRXPtr();
     
     void* loopStart = GetRXPtr();
@@ -246,6 +248,7 @@ void* Compiler::Gen_MemoryRoutine9Seq(bool store, bool preinc)
 
 void* Compiler::Gen_MemoryRoutine7Seq(bool store, bool preinc)
 {
+    AlignCode16();
     void* res = GetRXPtr();
 
     void* loopStart = GetRXPtr();

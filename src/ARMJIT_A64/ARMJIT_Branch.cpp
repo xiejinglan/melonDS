@@ -149,6 +149,7 @@ void Compiler::Comp_JumpTo(u32 addr, bool forceNonConstantCycles)
 
 void* Compiler::Gen_JumpTo9(int kind)
 {
+    AlignCode16();
     void* res = GetRXPtr();
 
     MOVI2R(W2, kCodeCacheTiming);

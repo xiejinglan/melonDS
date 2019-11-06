@@ -27,6 +27,10 @@
 
 #include "profiler.h"
 
+#ifdef GDB_ENABLED
+#include <gdbstub.h>
+#endif
+
 static EGLDisplay eglDisplay;
 static EGLContext eglCtx;
 static EGLSurface eglSurface;
@@ -527,7 +531,7 @@ void setupAudio()
 
     audrvVoiceSetDestinationMix(&audDrv, 0, AUDREN_FINAL_MIX_ID);
     audrvVoiceSetMixFactor(&audDrv, 0, 1.0f, 0, 0);
-    audrvVoiceSetMixFactor(&audDrv, 0, 1.0f, 0, 1);
+    audrvVoiceSetMixFactor(&audDrv, 0, 1.0f, 1, 1);
     audrvVoiceStart(&audDrv, 0);
 }
 
@@ -613,10 +617,12 @@ int main(int argc, char* argv[])
     setenv("NV50_PROG_DEBUG", "1", 1);
     setenv("NV50_PROG_CHIPSET", "0x120", 1);*/
 
-    /*socketInitializeDefault();
-    int nxlinkSocket = nxlinkStdio();*/
-    //GDBStub_Init();
-    //GDBStub_Breakpoint();
+#ifdef GDB_ENABLED
+    socketInitializeDefault();
+    int nxlinkSocket = nxlinkStdio();
+    GDBStub_Init();
+    GDBStub_Breakpoint();
+#endif
 
     InitEGL(nwindowGetDefault());
 
@@ -1193,8 +1199,10 @@ int main(int argc, char* argv[])
     }
 
     //close(nxlinkSocket);
-    //socketExit();
-    //GDBStub_Shutdown();
+#ifdef GDB_ENABLED
+    socketExit();
+    GDBStub_Shutdown();
+#endif
 
     return 0;
 }

@@ -47,10 +47,17 @@ else()
 	set(LIBNX ${DEVKITPRO}/libnx)
 endif()
 
+option(ENABLE_GDB "Enable GDB debugging" OFF)
+
+if (ENABLE_GDB)
+	set (gdb_link "-Wl,--whole-archive -lgdbstub -Wl,--no-whole-archive -lfmt -lstdc++")
+	add_definitions(-DGDB_ENABLED)
+endif()
+
 set(cross_prefix aarch64-none-elf-)
 set(arch_flags "-mtune=cortex-a57 -ffunction-sections -march=armv8-a+crc+crypto -mtp=soft -fPIE")
 set(inc_flags "-I${LIBNX}/include -I${DEVKITPRO}/portlibs/switch/include ${arch_flags}")
-set(link_flags "-L${LIBNX}/lib -L${DEVKITPRO}/portlibs/switch/lib -specs=${LIBNX}/switch.specs ${arch_flags}")
+set(link_flags "${gdb_link} -L${LIBNX}/lib -L${DEVKITPRO}/portlibs/switch/lib -specs=${LIBNX}/switch.specs ${arch_flags}")
 
 set(CMAKE_SYSTEM_PROCESSOR aarch64 CACHE INTERNAL "processor")
 set(CMAKE_LIBRARY_ARCHITECTURE aarch64-none-elf CACHE INTERNAL "abi")
