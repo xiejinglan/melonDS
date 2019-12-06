@@ -42,6 +42,8 @@ public:
 
     virtual void DoSavestate(Savestate* file);
 
+    virtual void FillPipeline() = 0;
+
     virtual void JumpTo(u32 addr, bool restorecpsr = false) = 0;
     void RestoreCPSR();
 
@@ -52,6 +54,9 @@ public:
     }
 
     virtual void Execute() = 0;
+#ifdef ENABLE_JIT
+    virtual void ExecuteJIT() = 0;
+#endif
 
     bool CheckCondition(u32 code)
     {
@@ -107,9 +112,16 @@ public:
     u32 Num;
 
     s32 Cycles;
-    u32 Halted;
-
-    u32 IRQ; // nonzero to trigger IRQ
+    union
+    {
+        struct
+        {
+            u8 Halted;
+            u8 IRQ; // nonzero to trigger IRQ
+            u8 IdleLoop;
+        };
+        u32 StopExecution;
+    };
 
     u32 CodeRegion;
     s32 CodeCycles;
@@ -145,12 +157,17 @@ public:
 
     void UpdateRegionTimings(u32 addrstart, u32 addrend);
 
+    void FillPipeline();
+
     void JumpTo(u32 addr, bool restorecpsr = false);
 
     void PrefetchAbort();
     void DataAbort();
 
     void Execute();
+#ifdef JIT_ENABLED
+    void ExecuteJIT();
+#endif
 
     // all code accesses are forced nonseq 32bit
     u32 CodeRead32(u32 addr, bool branch);
@@ -266,9 +283,14 @@ class ARMv4 : public ARM
 public:
     ARMv4();
 
+    void FillPipeline();
+
     void JumpTo(u32 addr, bool restorecpsr = false);
 
     void Execute();
+#ifdef JIT_ENABLED
+    void ExecuteJIT();
+#endif
 
     u16 CodeRead16(u32 addr)
     {
@@ -284,7 +306,7 @@ public:
     {
         *val = NDS::ARM7Read8(addr);
         DataRegion = addr >> 24;
-        DataCycles = NDS::ARM7MemTimings[DataRegion][0];
+        DataCycles = NDS::ARM7MemTimings[addr >> 15][0];
     }
 
     void DataRead16(u32 addr, u32* val)
@@ -293,7 +315,7 @@ public:
 
         *val = NDS::ARM7Read16(addr);
         DataRegion = addr >> 24;
-        DataCycles = NDS::ARM7MemTimings[DataRegion][0];
+        DataCycles = NDS::ARM7MemTimings[addr >> 15][0];
     }
 
     void DataRead32(u32 addr, u32* val)
@@ -302,7 +324,7 @@ public:
 
         *val = NDS::ARM7Read32(addr);
         DataRegion = addr >> 24;
-        DataCycles = NDS::ARM7MemTimings[DataRegion][2];
+        DataCycles = NDS::ARM7MemTimings[addr >> 15][2];
     }
 
     void DataRead32S(u32 addr, u32* val)
@@ -310,14 +332,14 @@ public:
         addr &= ~3;
 
         *val = NDS::ARM7Read32(addr);
-        DataCycles += NDS::ARM7MemTimings[DataRegion][3];
+        DataCycles += NDS::ARM7MemTimings[addr >> 15][3];
     }
 
     void DataWrite8(u32 addr, u8 val)
     {
         NDS::ARM7Write8(addr, val);
         DataRegion = addr >> 24;
-        DataCycles = NDS::ARM7MemTimings[DataRegion][0];
+        DataCycles = NDS::ARM7MemTimings[addr >> 15][0];
     }
 
     void DataWrite16(u32 addr, u16 val)
@@ -326,7 +348,7 @@ public:
 
         NDS::ARM7Write16(addr, val);
         DataRegion = addr >> 24;
-        DataCycles = NDS::ARM7MemTimings[DataRegion][0];
+        DataCycles = NDS::ARM7MemTimings[addr >> 15][0];
     }
 
     void DataWrite32(u32 addr, u32 val)
@@ -335,7 +357,7 @@ public:
 
         NDS::ARM7Write32(addr, val);
         DataRegion = addr >> 24;
-        DataCycles = NDS::ARM7MemTimings[DataRegion][2];
+        DataCycles = NDS::ARM7MemTimings[addr >> 15][2];
     }
 
     void DataWrite32S(u32 addr, u32 val)
@@ -343,7 +365,7 @@ public:
         addr &= ~3;
 
         NDS::ARM7Write32(addr, val);
-        DataCycles += NDS::ARM7MemTimings[DataRegion][3];
+        DataCycles += NDS::ARM7MemTimings[addr >> 15][3];
     }
 
 

@@ -43,6 +43,7 @@
 #include "../Wifi.h"
 #include "../Platform.h"
 #include "../Config.h"
+#include "../ARMJIT.h"
 
 #include "../Savestate.h"
 
@@ -2258,6 +2259,14 @@ void OnSetShowOSD(uiMenuItem* item, uiWindow* window, void* blarg)
 
 void ApplyNewSettings(int type)
 {
+#ifdef JIT_ENABLED
+    if (type == 4)
+    {
+        Reset(NULL);
+        return;
+    }
+#endif
+
     if (!RunningSomething)
     {
         if (type == 1) return;
