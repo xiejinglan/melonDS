@@ -63,7 +63,7 @@ void RebuiltFastMem9(ARMv5* cpu, u32 start, u32 end);
 void Init();
 void DeInit();
 
-void InvalidateByAddr(u32 pseudoPhysical);
+void InvalidateByAddr(u32 pseudoPhysical, bool mayRestore = true);
 void InvalidateAll();
 
 void InvalidateITCM(u32 addr);

@@ -16,12 +16,19 @@
     with melonDS. If not, see http://www.gnu.org/licenses/.
 */
 
-#ifndef VERSION_H
-#define VERSION_H
+#ifndef MELONCAP_H
+#define MELONCAP_H
 
-#define MELONDS_VERSION    "0.8.3-JIT"
+#include "types.h"
 
-#define MELONDS_URL        "http://melonds.kuribo64.net/"
+namespace MelonCap
+{
 
-#endif // VERSION_H
+void Init();
+void DeInit();
 
+void Update();
+
+}
+
+#endif // MELONCAP_H
