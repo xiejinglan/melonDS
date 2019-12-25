@@ -57,7 +57,7 @@ int threadNextCore = 1;
 void* Thread_Create(void (*func)())
 {
     Thread* thread = new Thread();
-    auto res = threadCreate(thread, ThreadEntry, (void*)func, STACK_SIZE, 0x30, threadNextCore++);
+    auto res = threadCreate(thread, ThreadEntry, (void*)func, NULL, STACK_SIZE, 0x30, threadNextCore++);
     threadStart(thread);
     printf("%d thread\n", res);
     return (void*)thread;

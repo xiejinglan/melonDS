@@ -324,11 +324,18 @@ void Compiler::Comp_MemAccess(int rd, int rn, Op2 offset, int size, int flags)
     else
         Comp_AddCycles_CDI();
 
-    if (Config::JIT_LiteralOptimisations && rd != 15 && rn == 15 && offset.IsImm && !(flags&(memop_Store|memop_Writeback|memop_Post)))
+    if (Config::JIT_LiteralOptimisations && rn == 15 && rd != 15 && offset.IsImm && !(flags & (memop_Post|memop_Store|memop_Writeback)))
     {
-        Comp_MemLoadLiteral(size, flags & memop_SignExtend, rd, R15 + offset.Imm * ((flags & memop_SubtractOffset) ? -1 : 1));
+        u32 addr = R15 + offset.Imm * ((flags & memop_SubtractOffset) ? -1 : 1);
+        u32 translatedAddr = Num == 0 ? TranslateAddr<0>(addr) : TranslateAddr<1>(addr);
+
+        if (!(CodeRanges[translatedAddr / 512].InvalidLiterals & (1 << ((translatedAddr & 0x1FF) / 16))))
+        {
+            Comp_MemLoadLiteral(size, flags & memop_SignExtend, rd, addr);
+            return;
+        }
     }
-    else
+
     {
         ARM64Reg rdMapped = MapReg(rd);
         ARM64Reg rnMapped = MapReg(rn);

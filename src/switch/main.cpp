@@ -687,7 +687,7 @@ int main(int argc, char* argv[])
 
     Thread audioThread;
     setupAudio();
-    threadCreate(&audioThread, audioOutput, NULL, 0x8000, 0x30, 2);
+    threadCreate(&audioThread, audioOutput, NULL, NULL, 0x8000, 0x30, 2);
     threadStart(&audioThread);
 
     printf("melonDS " MELONDS_VERSION "\n");
