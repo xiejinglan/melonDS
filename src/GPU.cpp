@@ -20,7 +20,7 @@
 #include <string.h>
 #include "NDS.h"
 #include "GPU.h"
-u64 vbltime;
+
 
 namespace GPU
 {
@@ -84,6 +84,13 @@ bool Accelerated;
 GPU2D* GPU2D_A;
 GPU2D* GPU2D_B;
 
+#ifdef NEONGPU_ENABLED
+u8 VRAMFlat_ABG[512*1024];
+u8 VRAMFlat_BBG[128*1024];
+
+u32 VRAMFlatMap_ABG[0x20];
+u32 VRAMFlatMap_BBG[0x8];
+#endif
 
 bool Init()
 {
@@ -135,6 +142,11 @@ void Reset()
     memset(VRAM_G, 0,  16*1024);
     memset(VRAM_H, 0,  32*1024);
     memset(VRAM_I, 0,  16*1024);
+
+#ifdef NEONGPU_ENABLED
+    memset(VRAMFlat_ABG, 0, 512*1024);
+    memset(VRAMFlat_BBG, 0, 128*1024);
+#endif
 
     memset(VRAMCNT, 0, 9);
     VRAMSTAT = 0;
@@ -1016,5 +1028,44 @@ void SetVCount(u16 val)
 
     NextVCount = val;
 }
+
+#ifdef NEONGPU_ENABLED
+void EnsureFlatVRAMCoherent(u32 num, u32 addr, u32 size)
+{
+    size = (size + 0x3FFF) & ~0x3FFF;
+    if (num == 0)
+    {
+        for (int i = addr / 0x4000; i < std::min(addr + size, (u32)sizeof(VRAMFlat_ABG)) / 0x4000; i++)
+        {
+            if (VRAMFlatMap_ABG[i] != VRAMMap_ABG[i])
+            {
+                if (VRAMPtr_ABG[i])
+                    memcpy(VRAMFlat_ABG + 0x4000 * i, VRAMPtr_ABG[i], 0x4000);
+                else
+                    for (int j = 0; j < 0x4000; j += 16)
+                        *(u128*)&VRAMFlat_ABG[0x4000 * i + j] =
+                            ReadVRAM_ABG<u128>(0x4000 * i + j);
+                VRAMFlatMap_ABG[i] = VRAMMap_ABG[i];
+            }
+        }
+    }
+    else
+    {
+        for (int i = addr / 0x4000; i < std::min(addr + size, (u32)sizeof(VRAMFlat_BBG)) / 0x4000; i++)
+        {
+            if (VRAMFlatMap_BBG[i] != VRAMMap_BBG[i])
+            {
+                if (VRAMPtr_BBG[i])
+                    memcpy(VRAMFlat_BBG + 0x4000 * i, VRAMPtr_BBG[i], 0x4000);
+                else
+                    for (int j = 0; j < 0x4000; j += 16)
+                        *(u128*)&VRAMFlat_BBG[0x4000 * i + j] =
+                            ReadVRAM_BBG<u128>(0x4000 * i + j);
+                VRAMFlatMap_BBG[i] = VRAMMap_BBG[i];
+            }
+        }
+    }
+}
+#endif
 
 }

@@ -19,19 +19,19 @@
 #ifndef GPU2D_H
 #define GPU2D_H
 
-class GPU2D
+#include "types.h"
+
+#include "Savestate.h"
+
+// GPU2DBase contains all of the memory interface
+// and functionality which would be unecessary to duplicate
+class GPU2DBase
 {
 public:
-    GPU2D(u32 num);
-    ~GPU2D();
+    GPU2DBase(u32 num);
 
     void Reset();
-
     void DoSavestate(Savestate* file);
-
-    void SetEnabled(bool enable) { Enabled = enable; }
-    void SetFramebuffer(u32* buf);
-    void SetDisplaySettings(bool accel);
 
     u8 Read8(u32 addr);
     u16 Read16(u32 addr);
@@ -39,6 +39,21 @@ public:
     void Write8(u32 addr, u8 val);
     void Write16(u32 addr, u16 val);
     void Write32(u32 addr, u32 val);
+
+    void SetEnabled(bool enable) { Enabled = enable; }
+    void SetFramebuffer(u32* buf);
+    virtual void SetDisplaySettings(bool accel) = 0;
+
+    void VBlank();
+    void VBlankEnd();
+
+    void CheckWindows(u32 line);
+
+    void BGExtPalDirty(u32 base);
+    void OBJExtPalDirty();
+
+    u16* GetBGExtPal(u32 slot, u32 pal);
+    u16* GetOBJExtPal();
 
     bool UsesFIFO()
     {
@@ -52,35 +67,15 @@ public:
 
     void SampleFIFO(u32 offset, u32 num);
 
-    void DrawScanline(u32 line);
-    void DrawSprites(u32 line);
-    void VBlank();
-    void VBlankEnd();
-
-    void CheckWindows(u32 line);
-
-    void BGExtPalDirty(u32 base);
-    void OBJExtPalDirty();
-
-    u16* GetBGExtPal(u32 slot, u32 pal);
-    u16* GetOBJExtPal();
-
-private:
+    virtual void DrawScanline(u32 line) = 0;
+    virtual void DrawSprites(u32 line) = 0;
+protected:
     u32 Num;
     bool Enabled;
     u32* Framebuffer;
 
-    bool Accelerated;
-
-    u32 BGOBJLine[256*3] __attribute__((aligned (8)));
-    u32* _3DLine;
-
     u8 WindowMask[256] __attribute__((aligned (8)));
-    u32 OBJLine[256] __attribute__((aligned (8)));
     u8 OBJWindow[256] __attribute__((aligned (8)));
-    u8 OBJIndex[256] __attribute__((aligned (8)));
-
-    u32 NumSprites;
 
     u16 DispFIFO[16];
     u32 DispFIFOReadPtr;
@@ -114,10 +109,6 @@ private:
     u8 BGMosaicY, BGMosaicYMax;
     u8 OBJMosaicYCount, OBJMosaicY, OBJMosaicYMax;
 
-    u8 MosaicTable[16][256];
-    u8* CurBGXMosaicTable;
-    u8* CurOBJXMosaicTable;
-
     u16 BlendCnt;
     u16 BlendAlpha;
     u8 EVA, EVB;
@@ -132,13 +123,39 @@ private:
     u32 BGExtPalStatus[4];
     u32 OBJExtPalStatus;
 
+    void CalculateWindowMask(u32 line);
+    void UpdateMosaicCounters(u32 line);
+};
+
+class GPU2DRegular : public GPU2DBase
+{
+public:
+    GPU2DRegular(u32 num);
+
+    void SetDisplaySettings(bool accel) override;
+
+    void DrawScanline(u32 line) override;
+    void DrawSprites(u32 line) override;
+private:
+    bool Accelerated;
+
+    u32 BGOBJLine[256*3] __attribute__((aligned (8)));
+    u32* _3DLine;
+
+    u32 OBJLine[256] __attribute__((aligned (8)));
+    u8 OBJIndex[256] __attribute__((aligned (8)));
+
+    u32 NumSprites;
+
+    u8 MosaicTable[16][256];
+    u8* CurBGXMosaicTable;
+    u8* CurOBJXMosaicTable;
+
     u32 ColorBlend4(u32 val1, u32 val2, u32 eva, u32 evb);
     u32 ColorBlend5(u32 val1, u32 val2);
     u32 ColorBrightnessUp(u32 val, u32 factor);
     u32 ColorBrightnessDown(u32 val, u32 factor);
     u32 ColorComposite(int i, u32 val1, u32 val2);
-
-    void UpdateMosaicCounters(u32 line);
 
     template<u32 bgmode> void DrawScanlineBGMode(u32 line);
     void DrawScanlineBGMode6(u32 line);
@@ -161,8 +178,32 @@ private:
     template<bool window> void DrawSprite_Normal(u32 num, u32 width, u32 height, s32 xpos, s32 ypos);
 
     void DoCapture(u32 line, u32 width);
-
-    void CalculateWindowMask(u32 line);
 };
+
+#ifdef NEONGPU_ENABLED
+class GPU2DNeon : public GPU2DBase
+{
+public:
+    GPU2DNeon(u32 num);
+
+    void SetDisplaySettings(bool accel) override;
+
+    void DrawScanline(u32 line) override;
+    void DrawSprites(u32 line) override;
+
+private:
+    u32 BGOBJLine[256*2] __attribute__((aligned (16)));
+    u32* _3DLine;
+
+    template<u32 bgmode> void DrawScanlineBGMode(u32 line);
+    void DrawScanline_BGOBJ(u32 line);
+
+    template <bool mosaic> void DrawBG_Text(u32 line, u32 bgnum);
+};
+
+typedef GPU2DNeon GPU2D;
+#else
+typedef GPU2DRegular GPU2D;
+#endif
 
 #endif

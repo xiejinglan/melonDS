@@ -28,4 +28,9 @@ typedef signed short        s16;
 typedef signed int          s32;
 typedef signed long long int     s64;
 
+#ifdef NEONGPU_ENABLED
+typedef __uint128_t u128;
+typedef __int128_t s128;
+#endif
+
 #endif // TYPES_H

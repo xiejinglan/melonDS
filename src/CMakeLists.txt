@@ -30,6 +30,17 @@ add_library(core STATIC
 	WifiAP.cpp
 )
 
+if (ARCHITECTURE STREQUAL ARM64)
+	option(ENABLE_NEONGPU "Enable GPU implementation utilising NEON instructions" ON)
+endif()
+
+if (ENABLE_NEONGPU)
+	target_sources(core PRIVATE
+		GPU2D_Neon.cpp
+	)
+	add_definitions(-DNEONGPU_ENABLED)
+endif()
+
 if (ENABLE_JIT)
 	target_sources(core PRIVATE
 		ARMJIT.cpp
