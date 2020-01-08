@@ -726,6 +726,7 @@ int main(int argc, char* argv[])
     }
 
     bool showGui = true;
+    bool navInput = true;
 
     FILE* perfRecord = NULL;
     int perfRecordMode = 0;
@@ -773,47 +774,83 @@ int main(int argc, char* argv[])
 
         u32 keysDown = hidKeysDown(CONTROLLER_P1_AUTO);
         u32 keysUp = hidKeysUp(CONTROLLER_P1_AUTO);
+        u32 keysHeld = hidKeysHeld(CONTROLLER_P1_AUTO);
 
-        for (int i = 0; i < 12; i++)
+        if (guiState > 0 && keysDown & KEY_ZL)
         {
-            if (keysDown & keyMappings[i])
-                NDS::PressKey(i > 9 ? i + 6 : i);
-            if (keysUp & keyMappings[i])
-                NDS::ReleaseKey(i > 9 ? i + 6 : i);
-        }
-
-        if (keysDown & KEY_LSTICK)
-        {
-            s16 input[1440];
-            for (int i = 0; i < 1440; i++)
-            {
-                microphoneNoise ^= microphoneNoise << 13;
-                microphoneNoise ^= microphoneNoise >> 17;
-                microphoneNoise ^= microphoneNoise << 5;
-                input[i] = microphoneNoise & 0xFFFF;
-            }
-            NDS::MicInputFrame(input, 1440);
-        }
-        if (keysUp & KEY_LSTICK)
-        {
-            s16 input[1440] = {0};
-            NDS::MicInputFrame(input, 1440);
-        }
-
-        if (keysDown & KEY_ZL)
             showGui ^= true;
+            navInput = showGui;
+        }
 
         {
             ImGuiIO& io = ImGui::GetIO();
             io.DisplaySize = ImVec2(1280.f, 720.f);
+            io.MouseDown[0] = false;
+
+            if (!navInput)
+            {
+                for (int i = 0; i < 12; i++)
+                {
+                    if (keysDown & keyMappings[i])
+                        NDS::PressKey(i > 9 ? i + 6 : i);
+                    if (keysUp & keyMappings[i])
+                        NDS::ReleaseKey(i > 9 ? i + 6 : i);
+                }
+
+                if (keysDown & KEY_LSTICK)
+                {
+                    s16 input[1440];
+                    for (int i = 0; i < 1440; i++)
+                    {
+                        microphoneNoise ^= microphoneNoise << 13;
+                        microphoneNoise ^= microphoneNoise >> 17;
+                        microphoneNoise ^= microphoneNoise << 5;
+                        input[i] = microphoneNoise & 0xFFFF;
+                    }
+                    NDS::MicInputFrame(input, 1440);
+                }
+                if (keysUp & KEY_LSTICK)
+                {
+                    s16 input[1440] = {0};
+                    NDS::MicInputFrame(input, 1440);
+                }
+            }
+            else
+            {
+                JoystickPosition lstick;
+                hidJoystickRead(&lstick, CONTROLLER_P1_AUTO, JOYSTICK_LEFT);
+            #define MAPNAV(name, key) io.NavInputs[ImGuiNavInput_##name] = keysHeld & KEY_##key ? 1.f : 0.f
+                MAPNAV(Activate, A);
+                MAPNAV(Cancel, B);
+                MAPNAV(Input, X);
+                MAPNAV(Menu, Y);
+                MAPNAV(DpadLeft, DLEFT);
+                MAPNAV(DpadRight, DRIGHT);
+                MAPNAV(DpadUp, DUP);
+                MAPNAV(DpadDown, DDOWN);
+                MAPNAV(FocusNext, R);
+                MAPNAV(FocusPrev, L);
+                if (lstick.dy < 0)
+                    io.NavInputs[ImGuiNavInput_LStickDown] = (float)lstick.dy / JOYSTICK_MIN;
+                if (lstick.dy > 0)
+                    io.NavInputs[ImGuiNavInput_LStickUp] = (float)lstick.dy / JOYSTICK_MAX;
+                if (lstick.dx < 0)
+                    io.NavInputs[ImGuiNavInput_LStickLeft] = (float)lstick.dx / JOYSTICK_MIN;
+                if (lstick.dx > 0)
+                    io.NavInputs[ImGuiNavInput_LStickRight] = (float)lstick.dx / JOYSTICK_MAX;
+            }
 
             if (hidTouchCount() > 0)
             {
+                io.MouseDrawCursor = false;
                 touchPosition pos;
                 hidTouchRead(&pos, 0);
 
-                io.MousePos = ImVec2((float)pos.px, (float)pos.py);
-                io.MouseDown[0] = true;
+                if (showGui)
+                {
+                    io.MousePos = ImVec2((float)pos.px, (float)pos.py);
+                    io.MouseDown[0] = true;
+                }
 
                 if (!io.WantCaptureMouse && pos.px >= botX && pos.px < (botX + botWidth) && pos.py >= botY && pos.py < (botY + botHeight))
                 {
@@ -851,7 +888,6 @@ int main(int argc, char* argv[])
             {
                 NDS::ReleaseKey(16 + 6);
                 NDS::ReleaseScreen();
-                io.MouseDown[0] = false;
             }
         }
 
@@ -1053,6 +1089,13 @@ int main(int argc, char* argv[])
 
             if (showGui)
             {
+                ImGui::Begin("Navigation");
+                if (navInput)
+                    navInput = navInput && !ImGui::Button("Give key input back to game");
+                else
+                    ImGui::Text("Hide and unhide the GUI to regain key input");
+                ImGui::End();
+
                 if (ImGui::Begin("Perf", NULL, ImGuiWindowFlags_AlwaysAutoResize))
                 {
                     ImGui::Text("frametime avg1: %fms avg2: %fms std dev: +/%fms max: %fms", frametimeSum, frametimeSum2, frametimeStddev, frametimeMax);
