@@ -75,7 +75,6 @@ protected:
     u32* Framebuffer;
 
     u8 WindowMask[256] __attribute__((aligned (8)));
-    u8 OBJWindow[256] __attribute__((aligned (8)));
 
     u16 DispFIFO[16];
     u32 DispFIFOReadPtr;
@@ -123,7 +122,7 @@ protected:
     u32 BGExtPalStatus[4];
     u32 OBJExtPalStatus;
 
-    void CalculateWindowMask(u32 line);
+    void CalculateWindowMask(u32 line, u8* objWindow);
     void UpdateMosaicCounters(u32 line);
 };
 
@@ -142,6 +141,7 @@ private:
     u32 BGOBJLine[256*3] __attribute__((aligned (8)));
     u32* _3DLine;
 
+    u8 OBJWindow[256] __attribute__((aligned (8)));
     u32 OBJLine[256] __attribute__((aligned (8)));
     u8 OBJIndex[256] __attribute__((aligned (8)));
 
@@ -192,6 +192,11 @@ public:
     void DrawSprites(u32 line) override;
 
 private:
+    u32 NumSprites[4];
+
+    u32 OBJLine[256 + 8*2];
+    u8 OBJWindow[256 + 8*2];
+    u8 OBJIndex[256 + 8*2];
     u32 BGOBJLine[256*2] __attribute__((aligned (16)));
     u32* _3DLine;
 
@@ -199,6 +204,8 @@ private:
     void DrawScanline_BGOBJ(u32 line);
 
     template <bool mosaic> void DrawBG_Text(u32 line, u32 bgnum);
+
+    template<bool window> void DrawSprite_Normal(u32 num, u32 width, u32 height, s32 xpos, s32 ypos);
 };
 
 typedef GPU2DNeon GPU2D;

@@ -723,7 +723,7 @@ void GPU2DBase::CheckWindows(u32 line)
     else if (line == Win1Coords[2]) Win1Active |=  0x1;
 }
 
-void GPU2DBase::CalculateWindowMask(u32 line)
+void GPU2DBase::CalculateWindowMask(u32 line, u8* objWindow)
 {
     for (u32 i = 0; i < 256; i++)
         WindowMask[i] = WinCnt[2]; // window outside
@@ -733,7 +733,7 @@ void GPU2DBase::CalculateWindowMask(u32 line)
         // OBJ window
         for (int i = 0; i < 256; i++)
         {
-            if (OBJWindow[i])
+            if (objWindow[i])
                 WindowMask[i] = WinCnt[3];
         }
     }
@@ -1451,7 +1451,7 @@ void GPU2DRegular::DrawScanline_BGOBJ(u32 line)
     }
 
     if (DispCnt & 0xE000)
-        CalculateWindowMask(line);
+        CalculateWindowMask(line, OBJWindow);
     else
         memset(WindowMask, 0xFF, 256);
 
