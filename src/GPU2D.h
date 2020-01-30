@@ -30,8 +30,8 @@ class GPU2DBase
 public:
     GPU2DBase(u32 num);
 
-    void Reset();
-    void DoSavestate(Savestate* file);
+    virtual void Reset();
+    virtual void DoSavestate(Savestate* file);
 
     u8 Read8(u32 addr);
     u16 Read16(u32 addr);
@@ -49,12 +49,8 @@ public:
 
     void CheckWindows(u32 line);
 
-    void BGExtPalDirty(u32 base);
-    void OBJExtPalDirty();
-
-    u16* GetBGExtPal(u32 slot, u32 pal);
-    u16* GetOBJExtPal();
-
+    virtual void BGExtPalDirty(u32 base) = 0;
+    virtual void OBJExtPalDirty() = 0;
     bool UsesFIFO()
     {
         if (((DispCnt >> 16) & 0x3) == 3)
@@ -73,8 +69,6 @@ protected:
     u32 Num;
     bool Enabled;
     u32* Framebuffer;
-
-    u8 WindowMask[256] __attribute__((aligned (8)));
 
     u16 DispFIFO[16];
     u32 DispFIFOReadPtr;
@@ -117,12 +111,7 @@ protected:
 
     u16 MasterBrightness;
 
-    u16 BGExtPalCache[4][16*256];
-    u16 OBJExtPalCache[16*256];
-    u32 BGExtPalStatus[4];
-    u32 OBJExtPalStatus;
-
-    void CalculateWindowMask(u32 line, u8* objWindow);
+    void CalculateWindowMask(u32 line, u8* window, u8* objWindow);
     void UpdateMosaicCounters(u32 line);
 };
 
@@ -131,15 +120,26 @@ class GPU2DRegular : public GPU2DBase
 public:
     GPU2DRegular(u32 num);
 
+    void Reset() override;
+    void DoSavestate(Savestate* file) override;
+
     void SetDisplaySettings(bool accel) override;
 
     void DrawScanline(u32 line) override;
     void DrawSprites(u32 line) override;
+    
+    void BGExtPalDirty(u32 base) override;
+    void OBJExtPalDirty() override;
+
+    u16* GetBGExtPal(u32 slot, u32 pal);
+    u16* GetOBJExtPal();
 private:
     bool Accelerated;
 
     u32 BGOBJLine[256*3] __attribute__((aligned (8)));
     u32* _3DLine;
+
+    u8 WindowMask[256] __attribute__((aligned(8)));
 
     u8 OBJWindow[256] __attribute__((aligned (8)));
     u32 OBJLine[256] __attribute__((aligned (8)));
@@ -178,6 +178,11 @@ private:
     template<bool window> void DrawSprite_Normal(u32 num, u32 width, u32 height, s32 xpos, s32 ypos);
 
     void DoCapture(u32 line, u32 width);
+    
+    u16 BGExtPalCache[4][16*256];
+    u16 OBJExtPalCache[16*256];
+    u32 BGExtPalStatus[4];
+    u32 OBJExtPalStatus;
 };
 
 #ifdef NEONGPU_ENABLED
@@ -186,19 +191,34 @@ class GPU2DNeon : public GPU2DBase
 public:
     GPU2DNeon(u32 num);
 
+    void Reset() override;
+    void DoSavestate(Savestate* file) override;
+    
     void SetDisplaySettings(bool accel) override;
 
     void DrawScanline(u32 line) override;
     void DrawSprites(u32 line) override;
 
+    void BGExtPalDirty(u32 base) override;
+    void OBJExtPalDirty() override;
+
+    void BGDirty();
+    void OBJDirty();
 private:
     u32 NumSprites[4];
 
-    u32 OBJLine[256 + 8*2];
-    u8 OBJWindow[256 + 8*2];
-    u8 OBJIndex[256 + 8*2];
-    u32 BGOBJLine[256*2] __attribute__((aligned (16)));
+    u64 BGExtPalUsed;
+    u64 BGExtPalStatus;
+
     u32* _3DLine;
+
+    u32 BGOBJLine[272*2] __attribute__((aligned (16)));
+    u32 OBJLine[272] __attribute__((aligned (16)));
+    u8 OBJWindow[272] __attribute__((aligned (16)));
+    u8 OBJIndex[272] __attribute__((aligned (16)));
+    u8 WindowMask[272] __attribute__((aligned(16)));
+
+    void EnsurePaletteCoherent();
 
     template<u32 bgmode> void DrawScanlineBGMode(u32 line);
     void DrawScanline_BGOBJ(u32 line);

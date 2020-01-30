@@ -131,12 +131,6 @@ void GPU2DBase::Reset()
     CaptureCnt = 0;
 
     MasterBrightness = 0;
-
-    BGExtPalStatus[0] = 0;
-    BGExtPalStatus[1] = 0;
-    BGExtPalStatus[2] = 0;
-    BGExtPalStatus[3] = 0;
-    OBJExtPalStatus = 0;
 }
 
 void GPU2DBase::DoSavestate(Savestate* file)
@@ -195,16 +189,6 @@ void GPU2DBase::DoSavestate(Savestate* file)
     {
         Win0Active = 0;
         Win1Active = 0;
-    }
-
-    if (!file->Saving)
-    {
-        // refresh those
-        BGExtPalStatus[0] = 0;
-        BGExtPalStatus[1] = 0;
-        BGExtPalStatus[2] = 0;
-        BGExtPalStatus[3] = 0;
-        OBJExtPalStatus = 0;
     }
 }
 
@@ -633,19 +617,114 @@ void GPU2DBase::SampleFIFO(u32 offset, u32 num)
     }
 }
 
+void GPU2DBase::CheckWindows(u32 line)
+{
+    line &= 0xFF;
+    if (line == Win0Coords[3])      Win0Active &= ~0x1;
+    else if (line == Win0Coords[2]) Win0Active |=  0x1;
+    if (line == Win1Coords[3])      Win1Active &= ~0x1;
+    else if (line == Win1Coords[2]) Win1Active |=  0x1;
+}
 
-void GPU2DBase::BGExtPalDirty(u32 base)
+void GPU2DBase::CalculateWindowMask(u32 line, u8* window, u8* objWindow)
+{
+    for (u32 i = 0; i < 256; i++)
+        window[i] = WinCnt[2]; // window outside
+
+    if (DispCnt & (1<<15))
+    {
+        // OBJ window
+        for (int i = 0; i < 256; i++)
+        {
+            if (objWindow[i])
+                window[i] = WinCnt[3];
+        }
+    }
+
+    if (DispCnt & (1<<14))
+    {
+        // window 1
+        u8 x1 = Win1Coords[0];
+        u8 x2 = Win1Coords[1];
+
+        for (int i = 0; i < 256; i++)
+        {
+            if (i == x2)      Win1Active &= ~0x2;
+            else if (i == x1) Win1Active |=  0x2;
+
+            if (Win1Active == 0x3) window[i] = WinCnt[1];
+        }
+    }
+
+    if (DispCnt & (1<<13))
+    {
+        // window 0
+        u8 x1 = Win0Coords[0];
+        u8 x2 = Win0Coords[1];
+
+        for (int i = 0; i < 256; i++)
+        {
+            if (i == x2)      Win0Active &= ~0x2;
+            else if (i == x1) Win0Active |=  0x2;
+
+            if (Win0Active == 0x3) window[i] = WinCnt[0];
+        }
+    }
+}
+
+
+GPU2DRegular::GPU2DRegular(u32 num)
+    : GPU2DBase(num)
+{
+    // initialize mosaic table
+    for (int m = 0; m < 16; m++)
+    {
+        for (int x = 0; x < 256; x++)
+        {
+            int offset = x % (m+1);
+            MosaicTable[m][x] = offset;
+        }
+    }
+}
+
+void GPU2DRegular::Reset()
+{
+    GPU2DBase::Reset();
+
+    BGExtPalStatus[0] = 0;
+    BGExtPalStatus[1] = 0;
+    BGExtPalStatus[2] = 0;
+    BGExtPalStatus[3] = 0;
+    OBJExtPalStatus = 0;
+}
+
+void GPU2DRegular::DoSavestate(Savestate* file)
+{
+    GPU2DBase::DoSavestate(file);
+
+    if (!file->Saving)
+    {
+        // refresh those
+        BGExtPalStatus[0] = 0;
+        BGExtPalStatus[1] = 0;
+        BGExtPalStatus[2] = 0;
+        BGExtPalStatus[3] = 0;
+        OBJExtPalStatus = 0;
+    }
+}
+
+void GPU2DRegular::BGExtPalDirty(u32 base)
 {
     BGExtPalStatus[base] = 0;
     BGExtPalStatus[base+1] = 0;
 }
 
-void GPU2DBase::OBJExtPalDirty()
+void GPU2DRegular::OBJExtPalDirty()
 {
     OBJExtPalStatus = 0;
 }
 
-u16* GPU2DBase::GetBGExtPal(u32 slot, u32 pal)
+u16* GPU2DRegular::GetBGExtPal(u32 slot, u32 pal)
 {
     u16* dst = &BGExtPalCache[slot][pal << 8];
 
@@ -681,7 +760,7 @@ u16* GPU2DBase::GetBGExtPal(u32 slot, u32 pal)
     return dst;
 }
 
-u16* GPU2DBase::GetOBJExtPal()
+u16* GPU2DRegular::GetOBJExtPal()
 {
     u16* dst = OBJExtPalCache;
 
@@ -711,77 +790,6 @@ u16* GPU2DBase::GetOBJExtPal()
     }
 
     return dst;
-}
-
-
-void GPU2DBase::CheckWindows(u32 line)
-{
-    line &= 0xFF;
-    if (line == Win0Coords[3])      Win0Active &= ~0x1;
-    else if (line == Win0Coords[2]) Win0Active |=  0x1;
-    if (line == Win1Coords[3])      Win1Active &= ~0x1;
-    else if (line == Win1Coords[2]) Win1Active |=  0x1;
-}
-
-void GPU2DBase::CalculateWindowMask(u32 line, u8* objWindow)
-{
-    for (u32 i = 0; i < 256; i++)
-        WindowMask[i] = WinCnt[2]; // window outside
-
-    if (DispCnt & (1<<15))
-    {
-        // OBJ window
-        for (int i = 0; i < 256; i++)
-        {
-            if (objWindow[i])
-                WindowMask[i] = WinCnt[3];
-        }
-    }
-
-    if (DispCnt & (1<<14))
-    {
-        // window 1
-        u8 x1 = Win1Coords[0];
-        u8 x2 = Win1Coords[1];
-
-        for (int i = 0; i < 256; i++)
-        {
-            if (i == x2)      Win1Active &= ~0x2;
-            else if (i == x1) Win1Active |=  0x2;
-
-            if (Win1Active == 0x3) WindowMask[i] = WinCnt[1];
-        }
-    }
-
-    if (DispCnt & (1<<13))
-    {
-        // window 0
-        u8 x1 = Win0Coords[0];
-        u8 x2 = Win0Coords[1];
-
-        for (int i = 0; i < 256; i++)
-        {
-            if (i == x2)      Win0Active &= ~0x2;
-            else if (i == x1) Win0Active |=  0x2;
-
-            if (Win0Active == 0x3) WindowMask[i] = WinCnt[0];
-        }
-    }
-}
-
-
-GPU2DRegular::GPU2DRegular(u32 num)
-    : GPU2DBase(num)
-{
-    // initialize mosaic table
-    for (int m = 0; m < 16; m++)
-    {
-        for (int x = 0; x < 256; x++)
-        {
-            int offset = x % (m+1);
-            MosaicTable[m][x] = offset;
-        }
-    }
 }
 
 void GPU2DRegular::SetDisplaySettings(bool accel)
@@ -1451,7 +1459,7 @@ void GPU2DRegular::DrawScanline_BGOBJ(u32 line)
     }
 
     if (DispCnt & 0xE000)
-        CalculateWindowMask(line, OBJWindow);
+        CalculateWindowMask(line, WindowMask, OBJWindow);
     else
         memset(WindowMask, 0xFF, 256);
 

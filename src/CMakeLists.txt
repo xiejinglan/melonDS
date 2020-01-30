@@ -38,6 +38,7 @@ if (ENABLE_NEONGPU)
 	target_sources(core PRIVATE
 		GPU2D_Neon.cpp
 	)
+
 	add_definitions(-DNEONGPU_ENABLED)
 endif()
 

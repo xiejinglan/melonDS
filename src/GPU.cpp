@@ -37,7 +37,11 @@ bool RunFIFO;
 
 u16 DispStat[2], VMatch[2];
 
+#ifndef NEONGPU_ENABLED
 u8 Palette[2*1024];
+#else
+u8 Palette[FastPaletteSize];
+#endif
 u8 OAM[2*1024];
 
 u8 VRAM_A[128*1024];
@@ -86,10 +90,14 @@ GPU2D* GPU2D_B;
 
 #ifdef NEONGPU_ENABLED
 u8 VRAMFlat_ABG[512*1024];
+u8 VRAMFlat_AOBJ[256*1024];
 u8 VRAMFlat_BBG[128*1024];
+u8 VRAMFlat_BOBJ[128*1024];
 
-u32 VRAMFlatMap_ABG[0x20];
-u32 VRAMFlatMap_BBG[0x8];
+u32 VRAMFlat_ABGStatus;
+u32 VRAMFlat_AOBJStatus;
+u32 VRAMFlat_BBGStatus;
+u32 VRAMFlat_BOBJStatus;
 #endif
 
 bool Init()
@@ -130,7 +138,7 @@ void Reset()
     VMatch[0] = 0;
     VMatch[1] = 0;
 
-    memset(Palette, 0, 2*1024);
+    memset(Palette, 0, sizeof(Palette));
     memset(OAM, 0, 2*1024);
 
     memset(VRAM_A, 0, 128*1024);
@@ -146,6 +154,13 @@ void Reset()
 #ifdef NEONGPU_ENABLED
     memset(VRAMFlat_ABG, 0, 512*1024);
     memset(VRAMFlat_BBG, 0, 128*1024);
+    memset(VRAMFlat_AOBJ, 0, 256*1024);
+    memset(VRAMFlat_BOBJ, 0, 128*1024);
+
+    VRAMFlat_ABGStatus = 0;
+    VRAMFlat_BBGStatus = 0;
+    VRAMFlat_AOBJStatus = 0;
+    VRAMFlat_BOBJStatus = 0;
 #endif
 
     memset(VRAMCNT, 0, 9);
@@ -270,6 +285,13 @@ void DoSavestate(Savestate* file)
     GPU2D_A->DoSavestate(file);
     GPU2D_B->DoSavestate(file);
     GPU3D::DoSavestate(file);
+
+#ifdef NEONGPU_ENABLED
+    VRAMFlat_ABGStatus = 0;
+    VRAMFlat_BBGStatus = 0;
+    VRAMFlat_AOBJStatus = 0;
+    VRAMFlat_BOBJStatus = 0;
+#endif
 }
 
 void AssignFramebuffers()
@@ -366,10 +388,17 @@ u8* GetUniqueBankPtr(u32 mask, u32 offset)
 #define MAP_RANGE(map, base, n)    for (int i = 0; i < n; i++) VRAMMap_##map[(base)+i] |= bankmask;
 #define UNMAP_RANGE(map, base, n)  for (int i = 0; i < n; i++) VRAMMap_##map[(base)+i] &= ~bankmask;
 
+#ifndef NEONGPU_ENABLED
 #define MAP_RANGE_PTR(map, base, n) \
     for (int i = 0; i < n; i++) { VRAMMap_##map[(base)+i] |= bankmask; VRAMPtr_##map[(base)+i] = GetUniqueBankPtr(VRAMMap_##map[(base)+i], ((base)+i)<<14); }
 #define UNMAP_RANGE_PTR(map, base, n) \
     for (int i = 0; i < n; i++) { VRAMMap_##map[(base)+i] &= ~bankmask; VRAMPtr_##map[(base)+i] = GetUniqueBankPtr(VRAMMap_##map[(base)+i], ((base)+i)<<14); }
+#else
+#define MAP_RANGE_PTR(map, base, n) \
+    for (int i = 0; i < n; i++) { VRAMFlat_##map##Status &= ~(1 << ((base)+i)); VRAMMap_##map[(base)+i] |= bankmask; VRAMPtr_##map[(base)+i] = GetUniqueBankPtr(VRAMMap_##map[(base)+i], ((base)+i)<<14); }
+#define UNMAP_RANGE_PTR(map, base, n) \
+    for (int i = 0; i < n; i++) { VRAMFlat_##map##Status &= ~(1 << ((base)+i)); VRAMMap_##map[(base)+i] &= ~bankmask; VRAMPtr_##map[(base)+i] = GetUniqueBankPtr(VRAMMap_##map[(base)+i], ((base)+i)<<14); }
+#endif
 
 void MapVRAM_AB(u32 bank, u8 cnt)
 {
@@ -600,6 +629,9 @@ void MapVRAM_FG(u32 bank, u8 cnt)
         case 1: // ABG
             {
                 u32 base = (oldofs & 0x1) + ((oldofs & 0x2) << 1);
+#ifdef NEONGPU_ENABLED
+                VRAMFlat_ABGStatus &= ~((1 << base) | (1 << (base + 2)));
+#endif
                 VRAMMap_ABG[base] &= ~bankmask;
                 VRAMMap_ABG[base + 2] &= ~bankmask;
                 VRAMPtr_ABG[base] = GetUniqueBankPtr(VRAMMap_ABG[base], base << 14);
@@ -610,6 +642,9 @@ void MapVRAM_FG(u32 bank, u8 cnt)
         case 2: // AOBJ
             {
                 u32 base = (oldofs & 0x1) + ((oldofs & 0x2) << 1);
+#ifdef NEONGPU_ENABLED
+                VRAMFlat_ABGStatus &= ~((1 << base) | (1 << (base + 2)));
+#endif
                 VRAMMap_AOBJ[base] &= ~bankmask;
                 VRAMMap_AOBJ[base + 2] &= ~bankmask;
                 VRAMPtr_AOBJ[base] = GetUniqueBankPtr(VRAMMap_AOBJ[base], base << 14);
@@ -645,6 +680,9 @@ void MapVRAM_FG(u32 bank, u8 cnt)
         case 1: // ABG
             {
                 u32 base = (ofs & 0x1) + ((ofs & 0x2) << 1);
+#ifdef NEONGPU_ENABLED
+                VRAMFlat_ABGStatus &= ~((1 << base) | (1 << (base + 2)));
+#endif
                 VRAMMap_ABG[base] |= bankmask;
                 VRAMMap_ABG[base + 2] |= bankmask;
                 VRAMPtr_ABG[base] = GetUniqueBankPtr(VRAMMap_ABG[base], base << 14);
@@ -655,6 +693,9 @@ void MapVRAM_FG(u32 bank, u8 cnt)
         case 2: // AOBJ
             {
                 u32 base = (ofs & 0x1) + ((ofs & 0x2) << 1);
+#ifdef NEONGPU_ENABLED
+                VRAMFlat_ABGStatus &= ~((1 << base) | (1 << (base + 2)));
+#endif
                 VRAMMap_AOBJ[base] |= bankmask;
                 VRAMMap_AOBJ[base + 2] |= bankmask;
                 VRAMPtr_AOBJ[base] = GetUniqueBankPtr(VRAMMap_AOBJ[base], base << 14);
@@ -698,6 +739,9 @@ void MapVRAM_H(u32 bank, u8 cnt)
             break;
 
         case 1: // BBG
+#ifdef NEONGPU_ENABLED
+            VRAMFlat_BBGStatus &= ~0x33;
+#endif
             VRAMMap_BBG[0] &= ~bankmask;
             VRAMMap_BBG[1] &= ~bankmask;
             VRAMMap_BBG[4] &= ~bankmask;
@@ -725,6 +769,9 @@ void MapVRAM_H(u32 bank, u8 cnt)
             break;
 
         case 1: // BBG
+#ifdef NEONGPU_ENABLED
+            VRAMFlat_BBGStatus &= ~0x33;
+#endif
             VRAMMap_BBG[0] |= bankmask;
             VRAMMap_BBG[1] |= bankmask;
             VRAMMap_BBG[4] |= bankmask;
@@ -762,6 +809,9 @@ void MapVRAM_I(u32 bank, u8 cnt)
             break;
 
         case 1: // BBG
+#ifdef NEONGPU_ENABLED
+            VRAMFlat_BBGStatus &= ~0xCC;
+#endif
             VRAMMap_BBG[2] &= ~bankmask;
             VRAMMap_BBG[3] &= ~bankmask;
             VRAMMap_BBG[6] &= ~bankmask;
@@ -792,6 +842,9 @@ void MapVRAM_I(u32 bank, u8 cnt)
             break;
 
         case 1: // BBG
+#ifdef NEONGPU_ENABLED
+            VRAMFlat_BBGStatus &= ~0xCC;
+#endif
             VRAMMap_BBG[2] |= bankmask;
             VRAMMap_BBG[3] |= bankmask;
             VRAMMap_BBG[6] |= bankmask;
@@ -1030,41 +1083,47 @@ void SetVCount(u16 val)
 }
 
 #ifdef NEONGPU_ENABLED
-void EnsureFlatVRAMCoherent(u32 num, u32 addr, u32 size)
+inline u8* GetCachePtr(u32 addr, u32 size, u8* flat, u32* status, u8** fastAccess, u128 (*slowAccess)(u32 addr), u32 num)
 {
-    size = (size + 0x3FFF) & ~0x3FFF;
-    if (num == 0)
+    u32 offset = addr & 0x3FFF;
+    addr >>= 14;
+    size = ((size + 0x3FFF) & ~0x3FFF) >> 14;
+    if (addr + size > num)
+        size = num - addr;
+    u32 sizeMask = (u32)((((u64)1 << size) - 1) << addr);
+    if ((*status & sizeMask) != sizeMask)
     {
-        for (int i = addr / 0x4000; i < std::min(addr + size, (u32)sizeof(VRAMFlat_ABG)) / 0x4000; i++)
+        u32 updateField = ~(*status) & sizeMask;
+        *status |= sizeMask;
+        while (updateField != 0)
         {
-            if (VRAMFlatMap_ABG[i] != VRAMMap_ABG[i])
-            {
-                if (VRAMPtr_ABG[i])
-                    memcpy(VRAMFlat_ABG + 0x4000 * i, VRAMPtr_ABG[i], 0x4000);
-                else
-                    for (int j = 0; j < 0x4000; j += 16)
-                        *(u128*)&VRAMFlat_ABG[0x4000 * i + j] =
-                            ReadVRAM_ABG<u128>(0x4000 * i + j);
-                VRAMFlatMap_ABG[i] = VRAMMap_ABG[i];
-            }
+            int idx = __builtin_ctz(updateField);
+            if (idx >= num)
+                break;
+            if (fastAccess[idx])
+                memcpy(flat + idx * 0x4000, fastAccess[idx], 0x4000);
+            else
+                for (int i = 0; i < 0x4000; i += 16)
+                    *(u128*)&flat[idx * 0x4000 + i] = slowAccess(idx * 0x4000 + i);
+            updateField &= ~(1 << idx);
         }
     }
-    else
-    {
-        for (int i = addr / 0x4000; i < std::min(addr + size, (u32)sizeof(VRAMFlat_BBG)) / 0x4000; i++)
-        {
-            if (VRAMFlatMap_BBG[i] != VRAMMap_BBG[i])
-            {
-                if (VRAMPtr_BBG[i])
-                    memcpy(VRAMFlat_BBG + 0x4000 * i, VRAMPtr_BBG[i], 0x4000);
-                else
-                    for (int j = 0; j < 0x4000; j += 16)
-                        *(u128*)&VRAMFlat_BBG[0x4000 * i + j] =
-                            ReadVRAM_BBG<u128>(0x4000 * i + j);
-                VRAMFlatMap_BBG[i] = VRAMMap_BBG[i];
-            }
-        }
-    }
+
+    return flat + addr * 0x4000 + offset;
+}
+
+u8* GetBGCachePtr(u32 num, u32 addr, u32 size)
+{
+    return num == 0
+        ? GetCachePtr(addr, size, VRAMFlat_ABG, &VRAMFlat_ABGStatus, VRAMPtr_ABG, ReadVRAM_ABG<u128>, 32)
+        : GetCachePtr(addr, size, VRAMFlat_BBG, &VRAMFlat_BBGStatus, VRAMPtr_BBG, ReadVRAM_BBG<u128>, 8);
+}
+
+u8* GetOBJCachePtr(u32 num, u32 addr, u32 size)
+{
+    return num == 0
+        ? GetCachePtr(addr, size, VRAMFlat_AOBJ, &VRAMFlat_AOBJStatus, VRAMPtr_AOBJ, ReadVRAM_AOBJ<u128>, 16)
+        : GetCachePtr(addr, size, VRAMFlat_BOBJ, &VRAMFlat_BOBJStatus, VRAMPtr_BOBJ, ReadVRAM_BOBJ<u128>, 8);
 }
 #endif
 

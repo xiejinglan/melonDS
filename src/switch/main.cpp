@@ -620,8 +620,8 @@ int main(int argc, char* argv[])
 #ifdef GDB_ENABLED
     socketInitializeDefault();
     int nxlinkSocket = nxlinkStdio();
-    GDBStub_Init();
-    GDBStub_Breakpoint();
+    //GDBStub_Init();
+    //GDBStub_Breakpoint();
 #endif
 
     InitEGL(nwindowGetDefault());
@@ -780,6 +780,8 @@ int main(int argc, char* argv[])
         {
             showGui ^= true;
             navInput = showGui;
+
+            NDS::SetKeyMask(0);
         }
 
         {
@@ -1244,7 +1246,7 @@ int main(int argc, char* argv[])
     //close(nxlinkSocket);
 #ifdef GDB_ENABLED
     socketExit();
-    GDBStub_Shutdown();
+    //GDBStub_Shutdown();
 #endif
 
     return 0;

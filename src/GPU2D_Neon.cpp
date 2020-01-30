@@ -6,33 +6,101 @@
 #include <string.h>
 #include <arm_neon.h>
 
+#include <assert.h>
+
 /*
-    optimised GPU2D for less powerful, but NEON capable devices
+    optimised GPU2D for aarch64 devices
+    which are usually less powerful, but support the NEON vector instruction set
 
     Q&A:
-        Why inline assembler instead of intrinsics or dedicated assembler files?
+        Why inline assembler instead of intrinsics?
             I would have loved to use intrinsics if GCC would produce good code for them.
             Sometimes it does, but once you cross the teritory of shrn/shrn2 and stuff 
             doing things like partial register writes the compiler output is just bad.
             Not even speaking of missing instructions such as ld1 with a set of four
             registers. 
+        Why are scratch registers hard coded?
+            For some stupid reason GCC only allows a maximum of 30 inline asm operands
+            (and read/write operands count twice!!). I used to use leave ARM temp register 
+            allocation to the compiler, until I hit the limit. Also Neon instructions 
+            like ld1 or tbl require adjacent registers which the compiler can't really
+            at all (manual register allocation seems to be broken/disabled with GCC 9.2.0),
+            so there manual allocation is the only choice.
 
-            C++ assembler interop with separate files is just a no, so inline assembly
-            is the only option left.
-        Why are the NEON registers hard coded?
-            Besides having full control over everything, instructions like ld1 or
-            tbl require adjacent registers which the compiler can't really handle well.
+    "If you have 32 registers - use 32 registers!!111!!11"
+        - me
+
 */
 
 GPU2DNeon::GPU2DNeon(u32 num)
     : GPU2DBase(num)
 {
+}
 
+void GPU2DNeon::Reset()
+{
+    GPU2DBase::Reset();
+
+    BGExtPalStatus = 0;
+}
+
+void GPU2DNeon::DoSavestate(Savestate* file)
+{
+    GPU2DBase::DoSavestate(file);
 }
 
 void GPU2DNeon::SetDisplaySettings(bool accel)
 {
     // OGL renderer is unsupported in conjunction with the Neon renderer
+}
+
+void GPU2DNeon::BGExtPalDirty(u32 base)
+{
+    BGExtPalStatus &= ~((u64)0xFFFFFFFF << (base * 16));
+}
+
+void GPU2DNeon::OBJExtPalDirty()
+{
+}
+
+void GPU2DNeon::EnsurePaletteCoherent()
+{
+    u64 paletteUpdates = BGExtPalUsed & ~BGExtPalStatus;
+    BGExtPalStatus |= paletteUpdates;
+    BGExtPalUsed = 0;
+
+    u8* base = GPU::Palette + (Num ? GPU::FastPalExtBOffset : GPU::FastPalExtAOffset) * 256 * 2;
+
+    while (paletteUpdates != 0)
+    {
+        int idx = __builtin_ctzll(paletteUpdates);
+
+        u16* dst = (u16*)(base + idx * 256 * 2);
+        if (Num)
+        {
+            u32 mapping = GPU::VRAMMap_BBGExtPal[idx >> 4];
+            if (mapping & (1<<7))
+                memcpy(dst, &GPU::VRAM_H[idx * 256 * 2], 256*2);
+            else
+                memset(dst, 0, 256*2);
+        }
+        else
+        {
+            u32 mapping = GPU::VRAMMap_ABGExtPal[idx >> 4];
+            memset(dst, 0, 256*2);
+            if (mapping & (1<<4))
+                for (int i = 0; i < 256; i += 4)
+                    *(u64*)&dst[i] |= *(u64*)&GPU::VRAM_E[idx * 256 * 2 + i * 2];
+            if (mapping & (1<<5))
+                for (int i = 0; i < 256; i += 4)
+                    *(u64*)&dst[i] |= *(u64*)&GPU::VRAM_F[(idx * 256 * 2 & 0x3FFF) + i * 2];
+            if (mapping & (1<<6))
+                for (int i = 0; i < 256; i += 4)
+                    *(u64*)&dst[i] |= *(u64*)&GPU::VRAM_G[(idx * 256 * 2 & 0x3FFF) + i * 2];
+        }
+
+        paletteUpdates &= ~((u64)1 << idx);
+    }
 }
 
 void GPU2DNeon::DrawScanline(u32 line)
@@ -42,19 +110,23 @@ void GPU2DNeon::DrawScanline(u32 line)
     int n3dline = line;
     line = GPU::VCount;
     
-    if (Num == 0)
-    {
-        if ((CaptureCnt & (1<<31)) && (((CaptureCnt >> 29) & 0x3) != 1))
-        {
-            _3DLine = GPU3D::GetLine(n3dline);
-            //GPU3D::GLRenderer::PrepareCaptureFrame();
-        }
-    }
+    if (Num == 0 && (CaptureCnt & (1<<31)) && (((CaptureCnt >> 29) & 0x3) != 1))
+        _3DLine = GPU3D::GetLine(n3dline);
 
     DrawScanline_BGOBJ(line);
     UpdateMosaicCounters(line);
 
-    memcpy(dst, BGOBJLine, 256*4);
+    EnsurePaletteCoherent();
+    bool arg = false;
+    for (int i = 0; i < 256; i++)
+    {
+        u32 val = BGOBJLine[i + 8];
+        u32 color1 = *(u16*)&GPU::Palette[(val & 0xFFFF) * 2];
+        u8 r = (color1 & 0x001F) << 1;
+        u8 g = (color1 & 0x03E0) >> 4;
+        u8 b = (color1 & 0x7C00) >> 9;
+        dst[i] = r | (g << 8) | (b << 16);
+    }
     for (int i = 0; i < 256; i+=2)
     {
         u64 c = *(u64*)&dst[i];
@@ -70,27 +142,20 @@ void GPU2DNeon::DrawScanline(u32 line)
 
 void GPU2DNeon::DrawScanline_BGOBJ(u32 line)
 {
-    u128 backdrop;
-    if (Num) backdrop = *(u16*)&GPU::Palette[0x400];
-    else     backdrop = *(u16*)&GPU::Palette[0];
-
     {
-        u8 r = (backdrop & 0x001F) << 1;
-        u8 g = (backdrop & 0x03E0) >> 4;
-        u8 b = (backdrop & 0x7C00) >> 9;
-
-        backdrop = r | (g << 8) | (b << 16) | 0x20000000;
+        u128 backdrop = Num ? 0x200 : 0;
+        backdrop |= 0x20000000;
         backdrop |= (backdrop << 32);
         backdrop |= (backdrop << 64);
 
         for (int i = 0; i < 256; i+=4)
-            *(u128*)&BGOBJLine[i] = backdrop;
+            *(u128*)&BGOBJLine[i + 8] = backdrop;
     }
 
     if (DispCnt & 0xE000)
-        CalculateWindowMask(line, &OBJWindow[8]);
+        CalculateWindowMask(line, &WindowMask[8], &OBJWindow[8]);
     else
-        memset(WindowMask, 0xFF, 256);
+        memset(WindowMask + 8, 0xFF, 256);
 
     switch (DispCnt & 0x7)
     {
@@ -169,7 +234,6 @@ void GPU2DNeon::DrawBG_Text(u32 line, u32 bgnum)
     u16 bgcnt = BGCnt[bgnum];
 
     u32 tilesetaddr, tilemapaddr;
-    u16* pal;
     u32 extpal, extpalslot;
 
     u16 xoff = BGXPos[bgnum];
@@ -188,437 +252,298 @@ void GPU2DNeon::DrawBG_Text(u32 line, u32 bgnum)
 
     if (Num)
     {
-        tilesetaddr = (bgcnt & 0x003C) << 12;
-        tilemapaddr = (bgcnt & 0x1F00) << 3;
-
-        pal = (u16*)&GPU::Palette[0x400];
+        tilesetaddr = ((bgcnt & 0x003C) << 12);
+        tilemapaddr = ((bgcnt & 0x1F00) << 3);
     }
     else
     {
         tilesetaddr = ((DispCnt & 0x07000000) >> 8) + ((bgcnt & 0x003C) << 12);
         tilemapaddr = ((DispCnt & 0x38000000) >> 11) + ((bgcnt & 0x1F00) << 3);
-
-        pal = (u16*)&GPU::Palette[0];
     }
-    
+
+    u32 width = (bgcnt & 0x4000) ? 512 : 256;
+    u32 height = (bgcnt & 0x8000) ? 512 : 256;
+    u8* tilemapptr = GPU::GetBGCachePtr(Num, tilemapaddr, width * height * 2);
+    u8* tilesetptr = GPU::GetBGCachePtr(Num, tilesetaddr, 1024 * (bgcnt & 0x80 ? 16 : 32));
+
     // adjust Y position in tilemap
     if (bgcnt & 0x8000)
     {
-        tilemapaddr += ((yoff & 0x1F8) << 3);
+        tilemapptr += ((yoff & 0x1F8) << 3);
         if (bgcnt & 0x4000)
-            tilemapaddr += ((yoff & 0x100) << 3);
+            tilemapptr += ((yoff & 0x100) << 3);
     }
     else
-        tilemapaddr += ((yoff & 0xF8) << 3);
-    
-    GPU::EnsureFlatVRAMCoherent(Num, tilemapaddr, 512 * 2);
-    GPU::EnsureFlatVRAMCoherent(Num, tilesetaddr, 1024 * (bgcnt & 0x80 ? 64 : 32));
+        tilemapptr += ((yoff & 0xF8) << 3);
 
-    u8* tilemapdata;
-    u8* tilesetdata;
-    if (Num)
+#define loadTile(out, xoff) \
+    "and w8, " xoff ", #0xF8\n" \
+    "and w9, " xoff ", %w[widexmask]\n" \
+    "add x8, %[tilemapptr], x8, lsr #2\n" \
+    "lsl w9, w9, #3\n" \
+    "ldrh " out ", [x8, x9]\n"
+#define loadPixels4(out, n, tile) \
+    "and w9, " tile ", 0x3FF\n" \
+    "add x9, %[tilesetptr], x9, lsl #5\n" \
+    "tst " tile ", #0x800\n" \
+    "csel w8, %w[yoff], %w[yoffFlipped], eq\n" \
+    "add x8, x8, x9\n" \
+    "ld1 {" out ".s}[" n "], [x8]\n"
+#define loadPixels8(out, n, tile) \
+    "and w9, " tile ", 0x3FF\n" \
+    "add x9, %[tilesetptr], x9, lsl #6\n" \
+    "tst " tile ", #0x800\n" \
+    "csel w8, %w[yoff], %w[yoffFlipped], eq\n" \
+    "add x8, x8, x9\n" \
+    "ld1 {" out ".d}[" n "], [x8]\n"
+    // used to be called loadStuff, but that was too informal
+#define loadMisc \
+    "ld1 {v6.16b, v7.16b}, [%[windowMask]], #32\n" \
+    \
+    "ld4 {v20.16b, v21.16b, v22.16b, v23.16b}, [%[dst]]\n" \
+    "add x8, %[dst], #272*4\n" \
+    "ld4 {v24.16b, v25.16b, v26.16b, v27.16b}, [x8]\n" \
+    "add x9, %[dst], #64\n" \
+    "ld4 {v28.16b, v29.16b, v30.16b, v31.16b}, [x9]\n"
+#define weavePixels(primary0, primary1) \
+    "add x10, %[dst], #(272*4)+64\n" \
+    "ld4 {v16.16b, v17.16b, v18.16b, v19.16b}, [x10]\n" \
+    \
+    /* where overriden replace/move first 16 pixels one layer down */ \
+    "bif v24.16b, v20.16b, v2.16b\n" \
+    "bif v25.16b, v21.16b, v2.16b\n" \
+    "bif v26.16b, v22.16b, v2.16b\n" \
+    "bif v27.16b, v23.16b, v2.16b\n" \
+    \
+    "bif v20.16b, v0.16b, v2.16b\n" \
+    "bif v21.16b, " primary0 ".16b, v2.16b\n" \
+    "bif v22.16b, %[paletteIndexSecondary].16b, v2.16b\n" \
+    "bif v23.16b, %[bgnumBit].16b, v2.16b\n" \
+    \
+    "st4 {v24.16b, v25.16b, v26.16b, v27.16b}, [x8]\n" \
+    \
+    /* next 16 pixels */ \
+    "bif v16.16b, v28.16b, v3.16b\n" \
+    "bif v17.16b, v29.16b, v3.16b\n" \
+    "bif v18.16b, v30.16b, v3.16b\n" \
+    "bif v19.16b, v31.16b, v3.16b\n" \
+    \
+    "st4 {v20.16b, v21.16b, v22.16b, v23.16b}, [%[dst]]\n" \
+    \
+    "bif v28.16b, v1.16b, v3.16b\n" \
+    "bif v29.16b, " primary1 ".16b, v3.16b\n" \
+    "bif v30.16b, %[paletteIndexSecondary].16b, v3.16b\n" \
+    "bif v31.16b, %[bgnumBit].16b, v3.16b\n" \
+    \
+    "st4 {v16.16b, v17.16b, v18.16b, v19.16b}, [x10]\n" \
+    "st4 {v28.16b, v29.16b, v30.16b, v31.16b}, [x9]\n"
+#define asmDefaultOutput \
+    [dst] "+r" (dst), [windowMask] "+r" (windowMask), \
+    [xoff] "+r" (xoff)
+#define asmDefaultInput(tileshift) \
+    [tilemapptr] "r" (tilemapptr), [tilesetptr] "r" (tilesetptr), \
+    [widexmask] "r" (widexmask), \
+    [xofftarget] "r" (xofftarget), \
+    [yoff] "r" ((yoff & 0x7) << tileshift), [yoffFlipped] "r" ((7 - (yoff & 0x7)) << tileshift), \
+    [bgnumBit] "w" (vdupq_n_u8(1 << bgnum)), [hflipMask] "w" (vdupq_n_u8(1 << 2)), \
+    [paletteIndexSecondary] "w" (vdupq_n_u8(0))
+#define asmDefaultScratch \
+    "x8", "x9", "x10", "x11", "x12", "x13", \
+    "q0", "q1", "q2", "q3", "q4", "q5", "q6", "q7", \
+    "q16", "q17", "q18", "q19", "q20", "q21", "q22", "q23", \
+    "q24", "q25", "q26", "q27", "q28", "q29", "q30", "q31", \
+    "memory", "cc"
+#define regExtpalUse(reg) \
+    "mov w8, #1\n" \
+    "ubfx " reg ", " reg ", #12, #4\n" \
+    "lsl w8, w8, " reg "\n" \
+    "orr %w[extpalsUsed], %w[extpalsUsed], w8\n"
+
+    u32 localxoff = 8 - (xoff & 0x7);
+    xoff &= ~0x7;
+
+    u32* dst = &BGOBJLine[localxoff];
+    u8* windowMask = &WindowMask[localxoff];
+    u32 xofftarget = xoff + 256 + (localxoff == 8 ? 0 : 8);
+
+    if (bgcnt & 0x80)
     {
-        tilemapdata = GPU::VRAMFlat_BBG + tilemapaddr;
-        tilesetdata = GPU::VRAMFlat_BBG + tilesetaddr;
-    }
-    else
-    {
-        tilemapdata = GPU::VRAMFlat_ABG + tilemapaddr;
-        tilesetdata = GPU::VRAMFlat_ABG + tilesetaddr;
-    }
+        u32 palOffset;
+        if (extpal)
+            palOffset = extpalslot * 16 + (Num ? GPU::FastPalExtBOffset : GPU::FastPalExtAOffset);
+        else
+            palOffset = Num ? 2 : 0;
+        u64 extpalsUsed = 0;
 
-    uint8x16_t colorConvertMask = vdupq_n_u8(0x3E);
-    uint8x16_t bgnumVec = vdupq_n_u8(1 << bgnum);
+        asm volatile (
+            "loopStart%=:\n"
+                loadTile("w10", "%w[xoff]")
+                "add w9, %w[xoff], #8\n"
+                loadTile("w11", "w9")
+                "add w9, %w[xoff], #16\n"
+                loadTile("w12", "w9")
+                "add w9, %w[xoff], #24\n"
+                loadTile("w13", "w9")
+                "add %w[xoff], %w[xoff], #32\n"
 
-    uint8x16_t scrollLUT;
-    u32 amountSecondTile = (xoff & 0x7) ? (xoff & 0x7) : 8;
-    u32 amountPrevTile = 8 - amountSecondTile;
-    for (int i = 0; i < amountPrevTile; i++)
-        scrollLUT[i] = 16 + 8 + amountSecondTile + i;
-    for (int i = 0; i < 8 + amountSecondTile; i++)
-        scrollLUT[amountPrevTile + i] = i;
+                "ubfx w8, w10, #8, #8\n"
+                "dup v18.16b, w8\n"
+                "ubfx w8, w11, #8, #8\n"
+                "dup v19.16b, w8\n"
+                loadPixels8("v0", "0", "w10")
+                loadPixels8("v0", "1", "w11")
+                regExtpalUse("w10")
+                regExtpalUse("w11")
+                "ext v16.16b, v18.16b, v19.16b, #8\n"
 
-    /*
-        normale sprites
-        besseres dirty tracking
-        master abblenden aufblenden und screen off
-        was mir so gefällt
-    */
-    if (bgcnt & 0x0080)
-    {
-        // 256-color
+                "ubfx w8, w12, #8, #8\n"
+                "dup v18.16b, w8\n"
+                "ubfx w8, w13, #8, #8\n"
+                "dup v19.16b, w8\n"
+                loadPixels8("v1", "0", "w12")
+                loadPixels8("v1", "1", "w13")
+                regExtpalUse("w12")
+                regExtpalUse("w13")
+                "ext v17.16b, v18.16b, v19.16b, #8\n"
 
-        if (xoff & 0x7)
-        {
-            u16 curtile = *(u16*)(tilemapdata + ((xoff & 0xF8) >> 2) + ((xoff & widexmask) << 3));
-            u16* curpal;
-            if (extpal) curpal = GetBGExtPal(extpalslot, curtile>>12);
-            else        curpal = pal;
-            u64 pixels = *(u64*)(tilesetdata + ((curtile & 0x03FF) << 6)
-                                        + (((curtile & 0x0800) ? (7-(yoff&0x7)) : (yoff&0x7)) << 3));
-            xoff += 8;
-            
-            if (curtile & 0x400)
-                pixels = __builtin_bswap64(pixels);
+                loadMisc
 
-            u64 tmp, tmp2, tmp3, tmp4, tmp5;
-            asm volatile (
-                "movi v1.16b, #0\n"
-                "movi v2.16b, #0\n"
+                "and v18.16b, v16.16b, %[hflipMask].16b\n"
+                "and v19.16b, v17.16b, %[hflipMask].16b\n"
+                "rev64 v2.16b, v0.16b\n"
+                "rev64 v3.16b, v1.16b\n"
+                "cmeq v18.16b, v18.16b, #0\n"
+                "cmeq v19.16b, v19.16b, #0\n"
+                "ushr v4.16b, v16.16b, #4\n"
+                "ushr v5.16b, v17.16b, #4\n"
+                "bif v0.16b, v2.16b, v18.16b\n"
+                "bif v1.16b, v3.16b, v19.16b\n"
+                "and v6.16b, v6.16b, %[bgnumBit].16b\n"
+                "and v7.16b, v7.16b, %[bgnumBit].16b\n"
+                "cmeq v2.16b, v0.16b, #0\n"
+                "cmeq v6.16b, v6.16b, #0\n"
+                "cmeq v3.16b, v1.16b, #0\n"
+                "cmeq v7.16b, v7.16b, #0\n"
+                "and v4.16b, v4.16b, %[extpalMask].16b\n"
+                "and v5.16b, v5.16b, %[extpalMask].16b\n"
+                "orr v2.16b, v2.16b, v6.16b\n"
+                "orr v3.16b, v3.16b, v7.16b\n"
+                "add v4.16b, v4.16b, %[palOffset].16b\n"
+                "add v5.16b, v5.16b, %[palOffset].16b\n"
 
-                "dup v13.2d, %[pixels]\n"
+                weavePixels("v4", "v5")
 
-                // palettise
-                "cbz %[pixels], tile0Empty%=\n"
-                "ubfx %[tmp], %[pixels], #0, #8\n"
-                "ldrh %w[tmp2], [%[curpal], %[tmp], lsl #1]\n"
-                "ubfx %[tmp], %[pixels], #8, #8\n"
-                "ldrh %w[tmp3], [%[curpal], %[tmp], lsl #1]\n"
-                "ubfx %[tmp], %[pixels], #16, #8\n"
-                "ldrh %w[tmp4], [%[curpal], %[tmp], lsl #1]\n"
-                "ubfx %[tmp], %[pixels], #24, #8\n"
-                "ldrh %w[tmp5], [%[curpal], %[tmp], lsl #1]\n"
-                "ubfx %[tmp], %[pixels], #32, #8\n"
-                "bfi %[tmp2], %[tmp3], #16, #16\n"
-                "bfi %[tmp2], %[tmp4], #32, #16\n"
-                "bfi %[tmp2], %[tmp5], #48, #16\n"
-                "ins v1.2d[0], %[tmp2]\n"
-                "ldrh %w[tmp2], [%[curpal], %[tmp], lsl #1]\n"
-                "ubfx %[tmp], %[pixels], #40, #8\n"
-                "ldrh %w[tmp3], [%[curpal], %[tmp], lsl #1]\n"
-                "ubfx %[tmp], %[pixels], #48, #8\n"
-                "ldrh %w[tmp4], [%[curpal], %[tmp], lsl #1]\n"
-                "ubfx %[tmp], %[pixels], #56, #8\n"
-                "ldrh %w[tmp5], [%[curpal], %[tmp], lsl #1]\n"
-                "bfi %[tmp2], %[tmp3], #16, #16\n"
-                "bfi %[tmp2], %[tmp4], #32, #16\n"
-                "bfi %[tmp2], %[tmp5], #48, #16\n"
-                "ins v1.2d[1], %[tmp2]\n"
-            "tile0Empty%=:\n"
+                "add %[dst], %[dst], #128\n"
+                "cmp %w[xoff], %w[xofftarget]\n"
+                "blo loopStart%=\n"
 
-                "uzp1 v9.16b, v1.16b, v1.16b\n"
-                "uzp2 v11.16b, v1.16b, v1.16b\n"
+            "cmp %w[xoff], %w[xofftarget]\n"
+            "sub %w[xoff], %w[xoff], #56\n"
+            "sub %[dst], %[dst], #56*4\n"
+            "sub %[windowMask], %[windowMask], #56\n"
+            "bne loopStart%=\n"
+            :
+                asmDefaultOutput, [extpalsUsed] "+r" (extpalsUsed)
+            :
+                asmDefaultInput(3), [extpalMask] "w" (vdupq_n_u8(extpal ? 0xFF : 0)),
+                [palOffset] "w" (vdupq_n_u8(palOffset))
+            :
+                asmDefaultScratch
+        );
 
-                "cmeq v13.16b, v13.16b, #0\n"
-                :
-                    [tmp] "+r" (tmp), [tmp2] "+r" (tmp2), [tmp3] "+r" (tmp3), [tmp4] "+r" (tmp4), [tmp5] "+r" (tmp5)  
-                :
-                    [pixels] "r" (pixels), [curpal] "r" (curpal)
-                :
-                    "q0", "q1", "q2", "q3", "q4", "q9", "q11", "q13"
-            );
-        }
-
-        for (int i = 0; i < 256; i += 16)
-        {
-            u16 curtile0 = *(u16*)(tilemapdata + ((xoff & 0xF8) >> 2) + ((xoff & widexmask) << 3));
-            u16* curpal0;
-            if (extpal) curpal0 = GetBGExtPal(extpalslot, curtile0>>12);
-            else        curpal0 = pal;
-            u64 pixels0 = *(u64*)(tilesetdata + ((curtile0 & 0x03FF) << 6)
-                                        + (((curtile0 & 0x0800) ? (7-(yoff&0x7)) : (yoff&0x7)) << 3));
-            xoff += 8;
-            u16 curtile1 = *(u16*)(tilemapdata + ((xoff & 0xF8) >> 2) + ((xoff & widexmask) << 3));
-            u16* curpal1;
-            if (extpal) curpal1 = GetBGExtPal(extpalslot, curtile1>>12);
-            else        curpal1 = pal;
-            u64 pixels1 = *(u64*)(tilesetdata + ((curtile1 & 0x03FF) << 6)
-                                        + (((curtile1 & 0x0800) ? (7-(yoff&0x7)) : (yoff&0x7)) << 3));
-            xoff += 8;
-            
-            if (curtile0 & 0x400)
-                pixels0 = __builtin_bswap64(pixels0);
-            if (curtile1 & 0x400)
-                pixels1 = __builtin_bswap64(pixels1);
-
-            u64 tmp, tmp2, tmp3, tmp4, tmp5;
-            asm volatile (
-                "ld4 {v19.16b, v20.16b, v21.16b, v22.16b}, [%[dst]]\n"
-                "ld4 {v23.16b, v24.16b, v25.16b, v26.16b}, [%[dstBelow]]\n"
-
-                "ld1 {v27.16b}, [%[windowMask]]\n"
-
-                "ins v12.2d[0], %[pixels0]\n"
-                "ins v12.2d[1], %[pixels1]\n"
-
-                "movi v1.16b, #0\n"
-                "movi v2.16b, #0\n"
-
-                // palettise
-                "cbz %[pixels0], tile0Empty%=\n"
-                "ubfx %[tmp], %[pixels0], #0, #8\n"
-                "ldrh %w[tmp2], [%[curpal0], %[tmp], lsl #1]\n"
-                "ubfx %[tmp], %[pixels0], #8, #8\n"
-                "ldrh %w[tmp3], [%[curpal0], %[tmp], lsl #1]\n"
-                "ubfx %[tmp], %[pixels0], #16, #8\n"
-                "ldrh %w[tmp4], [%[curpal0], %[tmp], lsl #1]\n"
-                "ubfx %[tmp], %[pixels0], #24, #8\n"
-                "ldrh %w[tmp5], [%[curpal0], %[tmp], lsl #1]\n"
-                "ubfx %[tmp], %[pixels0], #32, #8\n"
-                "bfi %[tmp2], %[tmp3], #16, #16\n"
-                "bfi %[tmp2], %[tmp4], #32, #16\n"
-                "bfi %[tmp2], %[tmp5], #48, #16\n"
-                "ins v1.2d[0], %[tmp2]\n"
-                "ldrh %w[tmp2], [%[curpal0], %[tmp], lsl #1]\n"
-                "ubfx %[tmp], %[pixels0], #40, #8\n"
-                "ldrh %w[tmp3], [%[curpal0], %[tmp], lsl #1]\n"
-                "ubfx %[tmp], %[pixels0], #48, #8\n"
-                "ldrh %w[tmp4], [%[curpal0], %[tmp], lsl #1]\n"
-                "ubfx %[tmp], %[pixels0], #56, #8\n"
-                "ldrh %w[tmp5], [%[curpal0], %[tmp], lsl #1]\n"
-                "bfi %[tmp2], %[tmp3], #16, #16\n"
-                "bfi %[tmp2], %[tmp4], #32, #16\n"
-                "bfi %[tmp2], %[tmp5], #48, #16\n"
-                "ins v1.2d[1], %[tmp2]\n"
-            "tile0Empty%=:\n"
-
-                // generate transparency mask
-                "cmeq v12.16b, v12.16b, #0\n"
-                "and v27.16b, v27.16b, %[bgnum].16b\n"
-                "tbl v0.16b, {v12.16b, v13.16b}, %[scrollLUT].16b\n"
-                "cmeq v27.16b, v27.16b, #0\n"
-
-                "cbz %[pixels1], tile1Empty%=\n"
-                "ubfx %[tmp], %[pixels1], #0, #8\n"
-                "ldrh %w[tmp2], [%[curpal1], %[tmp], lsl #1]\n"
-                "ubfx %[tmp], %[pixels1], #8, #8\n"
-                "ldrh %w[tmp3], [%[curpal1], %[tmp], lsl #1]\n"
-                "ubfx %[tmp], %[pixels1], #16, #8\n"
-                "ldrh %w[tmp4], [%[curpal1], %[tmp], lsl #1]\n"
-                "ubfx %[tmp], %[pixels1], #24, #8\n"
-                "ldrh %w[tmp5], [%[curpal1], %[tmp], lsl #1]\n"
-                "ubfx %[tmp], %[pixels1], #32, #8\n"
-                "bfi %[tmp2], %[tmp3], #16, #16\n"
-                "bfi %[tmp2], %[tmp4], #32, #16\n"
-                "bfi %[tmp2], %[tmp5], #48, #16\n"
-                "ins v2.2d[0], %[tmp2]\n"
-                "ldrh %w[tmp2], [%[curpal1], %[tmp], lsl #1]\n"
-                "ubfx %[tmp], %[pixels1], #40, #8\n"
-                "ldrh %w[tmp3], [%[curpal1], %[tmp], lsl #1]\n"
-                "ubfx %[tmp], %[pixels1], #48, #8\n"
-                "ldrh %w[tmp4], [%[curpal1], %[tmp], lsl #1]\n"
-                "ubfx %[tmp], %[pixels1], #56, #8\n"
-                "ldrh %w[tmp5], [%[curpal1], %[tmp], lsl #1]\n"
-                "bfi %[tmp2], %[tmp3], #16, #16\n"
-                "bfi %[tmp2], %[tmp4], #32, #16\n"
-                "bfi %[tmp2], %[tmp5], #48, #16\n"
-                "ins v2.2d[1], %[tmp2]\n"
-            "tile1Empty%=:\n"
-                "orr v0.16b, v0.16b, v27.16b\n"
-
-                "bif v23.16b, v19.16b, v0.16b\n"
-                "bif v24.16b, v20.16b, v0.16b\n"
-                "bif v25.16b, v21.16b, v0.16b\n"
-                "bif v26.16b, v22.16b, v0.16b\n"
-                
-                "uzp1 v8.16b, v1.16b, v2.16b\n"
-                "uzp2 v10.16b, v1.16b, v2.16b\n"
-
-                // apply scrolling to color
-                "tbl v3.16b, {v8.16b, v9.16b}, %[scrollLUT].16b\n"
-                "tbl v4.16b, {v10.16b, v11.16b}, %[scrollLUT].16b\n"
-
-                "st4 {v23.16b, v24.16b, v25.16b, v26.16b}, [%[dstBelow]]\n"
-                "mov v13.16b, v12.16b\n"
-
-                "mov v9.16b, v8.16b\n"
-                "mov v11.16b, v10.16b\n"
-
-                "ushr v5.16b, v4.16b, #1\n"
-                "zip2 v6.16b, v3.16b, v4.16b\n"
-                "zip1 v4.16b, v3.16b, v4.16b\n"
-                "shl v3.16b, v3.16b, #1\n"
-                "shrn v4.8b, v4.8h, #4\n"
-                "shrn2 v4.16b, v6.8h, #4\n"
-                "and v3.16b, v3.16b, %[colorConvertMask].16b\n"
-                "and v5.16b, v5.16b, %[colorConvertMask].16b\n"
-                "and v4.16b, v4.16b, %[colorConvertMask].16b\n"
-
-                "bif v19.16b, v3.16b, v0.16b\n"
-                "bif v20.16b, v4.16b, v0.16b\n"
-                "bif v21.16b, v5.16b, v0.16b\n"
-                "bif v22.16b, %[bgnum].16b, v0.16b\n"
-
-                "st4 {v19.16b, v20.16b, v21.16b, v22.16b}, [%[dst]]\n"
-
-                :
-                    [tmp] "+r" (tmp), [tmp2] "+r" (tmp2), [tmp3] "+r" (tmp3), [tmp4] "+r" (tmp4), [tmp5] "+r" (tmp5)
-                :
-                    [pixels0] "r" (pixels0), [pixels1] "r" (pixels1),
-                    [curpal0] "r" (curpal0), [curpal1] "r" (curpal1),
-                    [dst] "r" (&BGOBJLine[i]), [dstBelow] "r" (&BGOBJLine[i + 256]),
-                    [windowMask] "r" (&WindowMask[i]),
-                    [colorConvertMask] "w" (colorConvertMask),
-                    [bgnum] "w" (bgnumVec), [scrollLUT] "w" (scrollLUT)
-                :
-                    "memory",
-                    "q0", "q1", "q2", "q3", "q4", "q5", "q6", "q7",
-                    "q8", "q9", "q10", "q11", "q12", "q13", "q19", 
-                    "q20", "q21", "q22", "q23", "q24", "q25", "q26", "q27"
-            );
-        }
+        if (extpal)
+            BGExtPalUsed |= extpalsUsed << (extpalslot * 16);
     }
     else
     {
-        // 16-color
+        asm volatile (
+            "loopStart%=:\n"
+                // load the first four tiles
+                loadTile("w10", "%w[xoff]")
+                "add w9, %w[xoff], #8\n"
+                loadTile("w11", "w9")
+                "add w9, %w[xoff], #16\n"
+                loadTile("w12", "w9")
+                "add w9, %w[xoff], #24\n"
+                loadTile("w13", "w9")
+                "add %w[xoff], %w[xoff], #32\n"
 
-        uint8x16_t indexOffset = {16, 16, 16, 16, 16, 16, 16, 16, 0, 0, 0, 0, 0, 0, 0, 0};
+                "ubfx w8, w10, #8, #8\n"
+                "dup v18.16b, w8\n"
+                "ubfx w8, w11, #8, #8\n"
+                "dup v19.16b, w8\n"
+                loadPixels4("v0", "0", "w10")
+                loadPixels4("v0", "1", "w11")
+                "ext v16.16b, v18.16b, v19.16b, #8\n"
 
-        if (xoff & 0x7)
-        {
-            u16 curtile = *(u16*)(tilemapdata + ((xoff & 0xF8) >> 2) + ((xoff & widexmask) << 3));
-            u16* curpal = pal + ((curtile & 0xF000) >> 8);
-            u32 pixels = *(u32*)(tilesetdata + ((curtile & 0x03FF) << 5)
-                                        + (((curtile & 0x0800) ? (7-(yoff&0x7)) : (yoff&0x7)) << 2));
-            if (curtile & 0x400)
-            {
-                pixels = __builtin_bswap32(pixels);
-                pixels = ((pixels & 0xF0F0F0F0) >> 4) | ((pixels & 0x0F0F0F0F) << 4);
-            }
-            asm volatile (
-                "dup v2.4s, %w[pixels]\n"
-                // load palettes
-                "ld2 {v3.16b, v4.16b}, [%[curpal]]\n"
-                // unpack indices
-                "shl v1.8b, v2.8b, #4\n"
-                "ushr v0.8b, v2.8b, #4\n"
-                "ushr v1.8b, v1.8b, #4\n"
-                "zip1 v1.16b, v1.16b, v0.16b\n"
+                "ubfx w8, w12, #8, #8\n"
+                "dup v18.16b, w8\n"
+                "ubfx w8, w13, #8, #8\n"
+                "dup v19.16b, w8\n"
+                loadPixels4("v0", "2", "w12")
+                loadPixels4("v0", "3", "w13")
+                "ext v17.16b, v18.16b, v19.16b, #8\n"
 
-                "cmeq v13.16b, v1.16b, #0\n"
+                loadMisc
 
-                // palettise
-                "tbl v9.16b, {v3.16b}, v1.16b\n"
-                "tbl v11.16b, {v4.16b}, v1.16b\n"
-                :
-                :
-                    [pixels] "r" (pixels), [curpal] "r" (curpal)
-                :
-                    "q0", "q1", "q2", "q3", "q4", "q9", "q11", "q13"
-            );
-            xoff += 8;
-        }
+                "shl v2.16b, v0.16b, #4\n" // unpack 4 bit indices
+                "ushr v1.16b, v0.16b, #4\n"
+                "ushr v18.16b, v16.16b, #4\n" // extract palette offset
+                "ushr v19.16b, v17.16b, #4\n"
+                "ushr v2.16b, v2.16b, #4\n"
+                "and v16.16b, v16.16b, %[hflipMask].16b\n" // generate mask from h-flip bit
+                "and v17.16b, v17.16b, %[hflipMask].16b\n"
+                "zip1 v0.16b, v2.16b, v1.16b\n"
+                "zip2 v1.16b, v2.16b, v1.16b\n"
+                "cmeq v16.16b, v16.16b, #0\n"
+                "cmeq v17.16b, v17.16b, #0\n"
+                "rev64 v2.16b, v0.16b\n"
+                "rev64 v3.16b, v1.16b\n"
+                "shl v18.16b, v18.16b, #4\n"
+                "shl v19.16b, v19.16b, #4\n"
+                "bif v0.16b, v2.16b, v16.16b\n" // apply flipping
+                "bif v1.16b, v3.16b, v17.16b\n"
+                "and v6.16b, v6.16b, %[bgnumBit].16b\n" // prepare window mask
+                "and v7.16b, v7.16b, %[bgnumBit].16b\n"
+                "cmeq v2.16b, v0.16b, #0\n" // generate tile visibility mask
+                "cmeq v3.16b, v1.16b, #0\n"
+                "cmeq v6.16b, v6.16b, #0\n"
+                "cmeq v7.16b, v7.16b, #0\n"
+                "add v0.16b, v0.16b, v18.16b\n" // add palette offset
+                "orr v2.16b, v2.16b, v6.16b\n" // combine tile and window visibility
+                "add v1.16b, v1.16b, v19.16b\n"
+                "orr v3.16b, v3.16b, v7.16b\n"
 
-        for (int i = 0; i < 256; i += 16)
-        {
-            u16 curtile0 = *(u16*)(tilemapdata + ((xoff & 0xF8) >> 2) + ((xoff & widexmask) << 3));
-            u16* curpal0 = pal + ((curtile0 & 0xF000) >> 8);
-            u32 pixels0 = *(u32*)(tilesetdata + ((curtile0 & 0x03FF) << 5)
-                                        + (((curtile0 & 0x0800) ? (7-(yoff&0x7)) : (yoff&0x7)) << 2));
-            xoff += 8;
-            u16 curtile1 = *(u16*)(tilemapdata + ((xoff & 0xF8) >> 2) + ((xoff & widexmask) << 3));
-            u16* curpal1 = pal + ((curtile1 & 0xF000) >> 8);
-            u32 pixels1 = *(u32*)(tilesetdata + ((curtile1 & 0x03FF) << 5)
-                                        + (((curtile1 & 0x0800) ? (7-(yoff&0x7)) : (yoff&0x7)) << 2));
-            xoff += 8;
+                weavePixels("%[paletteIndexPrimary]", "%[paletteIndexPrimary]")
 
-            if (curtile0 & 0x400)
-            {
-                pixels0 = __builtin_bswap32(pixels0);
-                pixels0 = ((pixels0 & 0xF0F0F0F0) >> 4) | ((pixels0 & 0x0F0F0F0F) << 4);
-            }
-            if (curtile1 & 0x400)
-            {
-                pixels1 = __builtin_bswap32(pixels1);
-                pixels1 = ((pixels1 & 0xF0F0F0F0) >> 4) | ((pixels1 & 0x0F0F0F0F) << 4);
-            }
-            u64 pixels = (u64)pixels0 | ((u64)pixels1 << 32);
+                "add %[dst], %[dst], #128\n"
+                "cmp %w[xoff], %w[xofftarget]\n"
+                "blo loopStart%=\n"
 
-            // we do something potentially dangerous here
-            // q13, q9 and q11 are used to preserve state between loop iterations
-            asm volatile (
-                "dup v2.2d, %[pixels]\n"
+            // do the remaining part
+            "cmp %w[xoff], %w[xofftarget]\n"
+            "sub %w[xoff], %w[xoff], #56\n"
+            "sub %[dst], %[dst], #56*4\n"
+            "sub %[windowMask], %[windowMask], #56\n"
+            "bne loopStart%=\n"
 
-                // load palettes
-                "ld2 {v3.16b, v4.16b}, [%[curpal0]]\n"
-                "ld2 {v5.16b, v6.16b}, [%[curpal1]]\n"
-
-                "ld4 {v19.16b, v20.16b, v21.16b, v22.16b}, [%[dst]]\n"
-                "ld4 {v23.16b, v24.16b, v25.16b, v26.16b}, [%[dstBelow]]\n"
-
-                "ld1 {v27.16b}, [%[windowMask]]\n"
-
-                // unpack indices
-                "shl v1.8b, v2.8b, #4\n"
-                "ushr v0.8b, v2.8b, #4\n"
-                "ushr v1.8b, v1.8b, #4\n"
-                "zip1 v1.16b, v1.16b, v0.16b\n"
-
-                // move palette so it can be used for tbl
-                "mov v2.16b, v5.16b\n"
-                "mov v7.16b, v4.16b\n"
-
-                // generate transparency mask
-                "cmeq v12.16b, v1.16b, #0\n"
-                // for optimal scheduling the winodw code is a bit spread out
-                "and v27.16b, v27.16b, %[bgnum].16b\n"
-
-                "add v1.16b, v1.16b, %[indexOffset].16b\n"
-
-                // apply scrolling to mask
-                "tbl v0.16b, {v12.16b, v13.16b}, %[scrollLUT].16b\n"
-
-                "cmeq v27.16b, v27.16b, #0\n"
-
-                // palettise
-                "tbl v8.16b, {v2.16b, v3.16b}, v1.16b\n"
-                "tbl v10.16b, {v6.16b, v7.16b}, v1.16b\n"
-
-                "orr v0.16b, v0.16b, v27.16b\n"
-
-                "mov v13.16b, v12.16b\n"
-
-                // move overriden values into second blending layer
-                "bif v23.16b, v19.16b, v0.16b\n"
-                "bif v24.16b, v20.16b, v0.16b\n"
-                "bif v25.16b, v21.16b, v0.16b\n"
-                "bif v26.16b, v22.16b, v0.16b\n"
-
-                "st4 {v23.16b, v24.16b, v25.16b, v26.16b}, [%[dstBelow]]\n"
-
-                // apply scrolling to color
-                "tbl v3.16b, {v8.16b, v9.16b}, %[scrollLUT].16b\n"
-                "tbl v4.16b, {v10.16b, v11.16b}, %[scrollLUT].16b\n"
-
-                "mov v9.16b, v8.16b\n"
-                "mov v11.16b, v10.16b\n"
-
-                // convert 5-bit to 6-bit colors
-                "ushr v5.16b, v4.16b, #1\n"
-                "zip2 v6.16b, v3.16b, v4.16b\n"
-                "zip1 v4.16b, v3.16b, v4.16b\n"
-                "shl v3.16b, v3.16b, #1\n"
-                "shrn v4.8b, v4.8h, #4\n"
-                "shrn2 v4.16b, v6.8h, #4\n"
-                "and v3.16b, v3.16b, %[colorConvertMask].16b\n"
-                "and v5.16b, v5.16b, %[colorConvertMask].16b\n"
-                "and v4.16b, v4.16b, %[colorConvertMask].16b\n"
-
-                // move new values into first blending layer
-                "bif v19.16b, v3.16b, v0.16b\n"
-                "bif v20.16b, v4.16b, v0.16b\n"
-                "bif v21.16b, v5.16b, v0.16b\n"
-                "bif v22.16b, %[bgnum].16b, v0.16b\n"
-
-                "st4 {v19.16b, v20.16b, v21.16b, v22.16b}, [%[dst]]\n"
-                :
-                :
-                    [curpal0] "r" (curpal0), [curpal1] "r" (curpal1),
-                    [pixels] "r" (pixels),
-                    [dst] "r" (&BGOBJLine[i]), [dstBelow] "r" (&BGOBJLine[i + 256]),
-                    [indexOffset] "w" (indexOffset),
-                    [colorConvertMask] "w" (colorConvertMask),
-                    [bgnum] "w" (bgnumVec),
-                    [scrollLUT] "w" (scrollLUT),
-                    [windowMask] "r" (&WindowMask[i])
-                :
-                    "memory",
-                    "q0", "q1", "q2", "q3", "q4", "q5", "q6", "q7",
-                    "q8", "q9", "q10", "q11", "q12", "q13", "q19", 
-                    "q20", "q21", "q22", "q23", "q24", "q25", "q26", "q27"
-            );
-        }
+            :
+                asmDefaultOutput
+            :
+                asmDefaultInput(2), [paletteIndexPrimary] "w" (vdupq_n_u8(Num ? 2 : 0))
+            :
+                asmDefaultScratch
+        );
     }
+#undef loadTile
+#undef loadPixels4
+#undef loadPixels8
+#undef loadMisc
+#undef weavePixels
+#undef asmDefaultOutput
+#undef asmDefaultInput
+#undef asmDefaultScratch
+#undef regExtpalUse
 }
 
 #define DoDrawSprite(type, ...) \
@@ -632,7 +557,7 @@ void GPU2DNeon::DrawBG_Text(u32 line, u32 bgnum)
     }
 void GPU2DNeon::DrawSprites(u32 line)
 {
-    if (line == 0)
+    /*if (line == 0)
     {
         // reset those counters here
         // TODO: find out when those are supposed to be reset
@@ -740,7 +665,7 @@ void GPU2DNeon::DrawSprites(u32 line)
                 NumSprites[(bgnum - 0xC00) / 0x400]++;
             }
         }
-    }
+    }*/
 }
 
 /*

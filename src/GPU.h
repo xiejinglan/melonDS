@@ -33,7 +33,18 @@ extern u16 DispStat[2];
 extern u8 VRAMCNT[9];
 extern u8 VRAMSTAT;
 
+#ifndef NEONGPU_ENABLED
 extern u8 Palette[2*1024];
+#else
+// we have all of the palettes here in one place for fast indexing
+// first 2048 bytes are standard palette
+// followed by all cached Engine-A Ext palettes
+// and Engine-B Ext palettes
+const int FastPaletteSize = 2 * 256 * (4 + (4 * 16 + 16) * 2);
+const int FastPalExtAOffset = 4;
+const int FastPalExtBOffset = 4 + 4 * 16 + 16;
+extern u8 Palette[FastPaletteSize];
+#endif
 extern u8 OAM[2*1024];
 
 extern u8 VRAM_A[128*1024];
@@ -68,7 +79,9 @@ extern u8* VRAMPtr_BOBJ[0x8];
 
 #ifdef NEONGPU_ENABLED
 extern u8 VRAMFlat_ABG[512*1024];
+extern u8 VRAMFlat_AOBJ[256*1024];
 extern u8 VRAMFlat_BBG[128*1024];
+extern u8 VRAMFlat_BOBJ[128*1024];
 #endif
 
 extern int FrontBuffer;
@@ -421,7 +434,6 @@ T ReadVRAM_TexPal(u32 addr)
     return ret;
 }
 
-
 void SetPowerCnt(u32 val);
 
 void StartFrame();
@@ -436,7 +448,8 @@ void SetDispStat(u32 cpu, u16 val);
 void SetVCount(u16 val);
 
 #ifdef NEONGPU_ENABLED
-void EnsureFlatVRAMCoherent(u32 num, u32 addr, u32 size);
+u8* GetBGCachePtr(u32 num, u32 addr, u32 size);
+u8* GetOBJCachePtr(u32 num, u32 addr, u32 size);
 #endif
 
 }
