@@ -246,8 +246,8 @@ public:
 
     u32 DTCMSetting, ITCMSetting;
 
-    // those need to come in memory first
-    // so we can address them with a 12 bit immediate offset
+    // for aarch64 JIT they need to go up here
+    // to be addressable by a 12-bit immediate
     u32 ITCMSize;
     u32 DTCMBase, DTCMSize;
     s32 RegionCodeCycles;

@@ -44,6 +44,11 @@ FILE* OpenLocalFile(const char* path, const char* mode)
     return ret;
 }
 
+FILE* OpenDataFile(const char* path)
+{
+	return OpenLocalFile(path, "rb");
+}
+
 void ThreadEntry(void* param)
 {
     printf("thread activated\n");

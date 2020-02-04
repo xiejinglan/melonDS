@@ -386,21 +386,6 @@ Info Decode(bool thumb, u32 num, u32 instr)
             res.SrcRegs |= set;
         }
 
-        if (res.Kind == tk_LDMIA || res.Kind == tk_POP)
-        {
-            u32 set = (instr & 0xFF) & ~(res.DstRegs|res.SrcRegs);
-            res.NotStrictlyNeeded |= set;
-            res.DstRegs |= set;
-        }
-        if (res.Kind == tk_STMIA || res.Kind == tk_PUSH)
-        {
-            u32 set = (instr & 0xFF) & ~(res.DstRegs|res.SrcRegs);
-            if (res.Kind == tk_PUSH && instr & (1 << 8))
-                set |= (1 << 14);
-            res.NotStrictlyNeeded |= set;
-            res.SrcRegs |= set;
-        }
-
         res.EndBlock |= res.Branches();
 
         if (res.Kind == tk_BCOND)
@@ -413,6 +398,8 @@ Info Decode(bool thumb, u32 num, u32 instr)
         u32 data = ARMInstrTable[((instr >> 4) & 0xF) | ((instr >> 16) & 0xFF0)];
         if (num == 0 && (instr & 0xFE000000) == 0xFA000000)
             data = A_BLX_IMM;
+        else if ((instr >> 28) == 0xF)
+            data = ak(ak_Nop);
 
         if (data & A_UnkOnARM7 && num != 0)
             data = A_UNK;
@@ -436,7 +423,6 @@ Info Decode(bool thumb, u32 num, u32 instr)
             u32 cp = ((instr >> 8) & 0xF);
             if ((num == 0 && cp != 15) || (num == 1 && cp != 14))
             {
-                printf("happens\n");
                 data = A_UNK;
                 res.Kind = ak_UNK;
             }
