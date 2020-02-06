@@ -778,10 +778,15 @@ int main(int argc, char* argv[])
 
         if (guiState > 0 && keysDown & KEY_ZL)
         {
+            if (!showGui)
+            {
+                for (int i = 0; i < 12; i++)
+                    NDS::ReleaseKey(i > 9 ? i + 6 : i);
+                NDS::ReleaseScreen();
+            }
+
             showGui ^= true;
             navInput = showGui;
-
-            NDS::SetKeyMask(0);
         }
 
         {

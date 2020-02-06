@@ -43,6 +43,7 @@ extern u8 Palette[2*1024];
 const int FastPaletteSize = 2 * 256 * (4 + (4 * 16 + 16) * 2);
 const int FastPalExtAOffset = 4;
 const int FastPalExtBOffset = 4 + 4 * 16 + 16;
+const int FastPalExtBGSize = 4 * 16;
 extern u8 Palette[FastPaletteSize];
 #endif
 extern u8 OAM[2*1024];

@@ -8,6 +8,8 @@
 
 #include <assert.h>
 
+#include "switch/custom_counter.h"
+
 /*
     optimised GPU2D for aarch64 devices
     which are usually less powerful, but support the NEON vector instruction set
@@ -23,13 +25,34 @@
             For some stupid reason GCC only allows a maximum of 30 inline asm operands
             (and read/write operands count twice!!). I used to use leave ARM temp register 
             allocation to the compiler, until I hit the limit. Also Neon instructions 
-            like ld1 or tbl require adjacent registers which the compiler can't really
+            like ld1 or tbl require adjacent registers which the compiler can't handle
             at all (manual register allocation seems to be broken/disabled with GCC 9.2.0),
-            so there manual allocation is the only choice.
+            so manual allocation is the only choice.
 
     "If you have 32 registers - use 32 registers!!111!!11"
         - me
 
+    BGOBJLine format:
+        * when palette index:
+            * byte 0: color index
+            * byte 1: palette index
+            * byte 2: bit 7: 0
+        * when direct 6-bit color:
+            * byte 0: red
+            * byte 1: green
+            * byte 2:
+                * bit 0-5: blue
+                * bit 7: 1
+        * byte 3:
+            * bit 0-2: source (0-3 BG0-BG3, 4 OBJ, 5 backdrop, 6 semi transparent sprite, 7 3D layer)
+
+    OBJLine format:
+        * byte 0-2 same as BGOBJLine
+        * byte 3:
+            * bit 0-2: source (same as BGOBJLine)
+            * bit 3-4: layer
+            * bit 5: opaqueness
+            * bit 6: sprite mosaic is here enabled
 */
 
 GPU2DNeon::GPU2DNeon(u32 num)
@@ -117,7 +140,7 @@ void GPU2DNeon::DrawScanline(u32 line)
     UpdateMosaicCounters(line);
 
     EnsurePaletteCoherent();
-    bool arg = false;
+
     for (int i = 0; i < 256; i++)
     {
         u32 val = BGOBJLine[i + 8];
@@ -127,6 +150,7 @@ void GPU2DNeon::DrawScanline(u32 line)
         u8 b = (color1 & 0x7C00) >> 9;
         dst[i] = r | (g << 8) | (b << 16);
     }
+
     for (int i = 0; i < 256; i+=2)
     {
         u64 c = *(u64*)&dst[i];
@@ -142,6 +166,7 @@ void GPU2DNeon::DrawScanline(u32 line)
 
 void GPU2DNeon::DrawScanline_BGOBJ(u32 line)
 {
+    EnterProfileSection();
     {
         u128 backdrop = Num ? 0x200 : 0;
         backdrop |= 0x20000000;
@@ -168,6 +193,7 @@ void GPU2DNeon::DrawScanline_BGOBJ(u32 line)
     //case 6: DrawScanlineBGMode6(line); break;
     //case 7: DrawScanlineBGMode7(line); break;
     }
+    CloseProfileSection();
 }
 
 #define DoDrawBG(type, line, num) \
@@ -223,9 +249,89 @@ void GPU2DNeon::DrawScanlineBGMode(u32 line)
                     DoDrawBG(Text, line, 0)
             }
         }
-        //if ((DispCnt & 0x1000) && NumSprites)
-        //    InterleaveSprites(0x40000 | (i<<16));
+        if ((DispCnt & 0x1000) && NumSprites[i])
+            InterleaveSprites(0x20 | (i<<3));
     }
+}
+
+void GPU2DNeon::InterleaveSprites(u32 prio)
+{
+    u32* bgline = &BGOBJLine[8];
+    u32* objline = &OBJLine[8];
+    u8* window = &WindowMask[8];
+    asm volatile (
+        "loopStart%=:"
+            "ld1 {v0.16b - v1.16b}, [%[window]], #32\n"
+
+            "ld4 {v16.16b - v19.16b}, [%[objline]], #4*16\n"
+            "ld4 {v20.16b - v23.16b}, [%[objline]], #4*16\n"
+
+            "ld4 {v4.16b - v7.16b}, [%[bgline]]\n"
+            "add x8, %[bgline], #4*256\n"
+            "ld4 {v8.16b - v11.16b}, [x8]\n"
+            "add x9, %[bgline], #4*16\n"
+            "ld4 {v24.16b - v27.16b}, [x9]\n"
+            "add x10, %[bgline], #4*(256+16)\n"
+            "ld4 {v28.16b - v31.16b}, [x10]\n"
+            
+            "and v0.16b, v0.16b, %[spriteBit].16b\n"
+            "and v1.16b, v1.16b, %[spriteBit].16b\n"
+            "cmeq v0.16b, v0.16b, #0\n"
+            "cmeq v1.16b, v1.16b, #0\n"
+
+            "and v2.16b, v19.16b, %[prioMask].16b\n"
+            "and v3.16b, v23.16b, %[prioMask].16b\n"
+            "cmeq v2.16b, v2.16b, #0\n"
+            "cmeq v3.16b, v3.16b, #0\n"
+
+            "orr v0.16b, v0.16b, v2.16b\n"
+            "orr v1.16b, v1.16b, v3.16b\n"
+
+            "bif v8.16b, v4.16b, v0.16b\n"
+            "bif v9.16b, v5.16b, v0.16b\n"
+            "bif v10.16b, v6.16b, v0.16b\n"
+            "bif v11.16b, v7.16b, v0.16b\n"
+
+            "bif v4.16b, v16.16b, v0.16b\n"
+            "bif v5.16b, v17.16b, v0.16b\n"
+            "bif v6.16b, v18.16b, v0.16b\n"
+            "bif v7.16b, v19.16b, v0.16b\n"
+
+            "st4 {v8.16b - v11.16b}, [x8]\n"
+
+            "bif v28.16b, v24.16b, v1.16b\n"
+            "bif v29.16b, v25.16b, v1.16b\n"
+            "bif v30.16b, v26.16b, v1.16b\n"
+            "bif v31.16b, v27.16b, v1.16b\n"
+
+            "st4 {v4.16b - v7.16b}, [%[bgline]]\n"
+
+            "bif v24.16b, v20.16b, v1.16b\n"
+            "bif v25.16b, v21.16b, v1.16b\n"
+            "bif v26.16b, v22.16b, v1.16b\n"
+            "bif v27.16b, v23.16b, v1.16b\n"
+
+            "st4 {v28.16b - v31.16b}, [x10]\n"
+            "st4 {v24.16b - v27.16b}, [x9]\n"
+
+            "add %[bgline], %[bgline], #32*4\n"
+            "cmp %[bgline], %[bglineTarget]\n"
+            "blt loopStart%=\n"
+        :
+            [objline] "+r" (objline), [bgline] "+r" (bgline),
+            [window] "+r" (window)
+        :
+            [spriteBit] "w" (vdupq_n_u8(1 << 4)), [prio] "w" (vdupq_n_u8(prio)),
+            [prioMask] "w" (vdupq_n_u8(0x70)),
+            [bglineTarget] "r" (&BGOBJLine[8 + 256])
+        :
+            "x8", "x9", "x10",
+            "q0", "q1", "q2", "q3", "q4", "q5", "q6", "q7",
+            "q8", "q9", "q10", "q11", "q16", "q17", "q18", 
+            "q19", "q20", "q21", "q22", "q23", "q24", "q25", 
+            "q26", "q27", "q28", "q29", "q30", "q31",
+            "memory", "cc"
+    );
 }
 
 template<bool mosaic>
@@ -300,14 +406,14 @@ void GPU2DNeon::DrawBG_Text(u32 line, u32 bgnum)
 #define loadMisc \
     "ld1 {v6.16b, v7.16b}, [%[windowMask]], #32\n" \
     \
-    "ld4 {v20.16b, v21.16b, v22.16b, v23.16b}, [%[dst]]\n" \
+    "ld4 {v20.16b - v23.16b}, [%[dst]]\n" \
     "add x8, %[dst], #272*4\n" \
-    "ld4 {v24.16b, v25.16b, v26.16b, v27.16b}, [x8]\n" \
+    "ld4 {v24.16b - v27.16b}, [x8]\n" \
     "add x9, %[dst], #64\n" \
-    "ld4 {v28.16b, v29.16b, v30.16b, v31.16b}, [x9]\n"
+    "ld4 {v28.16b - v31.16b}, [x9]\n"
 #define weavePixels(primary0, primary1) \
     "add x10, %[dst], #(272*4)+64\n" \
-    "ld4 {v16.16b, v17.16b, v18.16b, v19.16b}, [x10]\n" \
+    "ld4 {v16.16b - v19.16b}, [x10]\n" \
     \
     /* where overriden replace/move first 16 pixels one layer down */ \
     "bif v24.16b, v20.16b, v2.16b\n" \
@@ -318,7 +424,7 @@ void GPU2DNeon::DrawBG_Text(u32 line, u32 bgnum)
     "bif v20.16b, v0.16b, v2.16b\n" \
     "bif v21.16b, " primary0 ".16b, v2.16b\n" \
     "bif v22.16b, %[paletteIndexSecondary].16b, v2.16b\n" \
-    "bif v23.16b, %[bgnumBit].16b, v2.16b\n" \
+    "bif v23.16b, %[bgnum].16b, v2.16b\n" \
     \
     "st4 {v24.16b, v25.16b, v26.16b, v27.16b}, [x8]\n" \
     \
@@ -333,7 +439,7 @@ void GPU2DNeon::DrawBG_Text(u32 line, u32 bgnum)
     "bif v28.16b, v1.16b, v3.16b\n" \
     "bif v29.16b, " primary1 ".16b, v3.16b\n" \
     "bif v30.16b, %[paletteIndexSecondary].16b, v3.16b\n" \
-    "bif v31.16b, %[bgnumBit].16b, v3.16b\n" \
+    "bif v31.16b, %[bgnum].16b, v3.16b\n" \
     \
     "st4 {v16.16b, v17.16b, v18.16b, v19.16b}, [x10]\n" \
     "st4 {v28.16b, v29.16b, v30.16b, v31.16b}, [x9]\n"
@@ -345,7 +451,8 @@ void GPU2DNeon::DrawBG_Text(u32 line, u32 bgnum)
     [widexmask] "r" (widexmask), \
     [xofftarget] "r" (xofftarget), \
     [yoff] "r" ((yoff & 0x7) << tileshift), [yoffFlipped] "r" ((7 - (yoff & 0x7)) << tileshift), \
-    [bgnumBit] "w" (vdupq_n_u8(1 << bgnum)), [hflipMask] "w" (vdupq_n_u8(1 << 2)), \
+    [bgnumBit] "w" (vdupq_n_u8(1 << bgnum)), [bgnum] "w" (vdupq_n_u8(bgnum)), \
+    [hflipMask] "w" (vdupq_n_u8(1 << 2)), \
     [paletteIndexSecondary] "w" (vdupq_n_u8(0))
 #define asmDefaultScratch \
     "x8", "x9", "x10", "x11", "x12", "x13", \
@@ -410,25 +517,25 @@ void GPU2DNeon::DrawBG_Text(u32 line, u32 bgnum)
 
                 "and v18.16b, v16.16b, %[hflipMask].16b\n"
                 "and v19.16b, v17.16b, %[hflipMask].16b\n"
-                "rev64 v2.16b, v0.16b\n"
+                "rev64 v2.16b, v0.16b\n" // flip tiles
                 "rev64 v3.16b, v1.16b\n"
-                "cmeq v18.16b, v18.16b, #0\n"
+                "cmeq v18.16b, v18.16b, #0\n" // generate mask for horizontal tiles
                 "cmeq v19.16b, v19.16b, #0\n"
-                "ushr v4.16b, v16.16b, #4\n"
+                "ushr v4.16b, v16.16b, #4\n" // extract palette offset
                 "ushr v5.16b, v17.16b, #4\n"
-                "bif v0.16b, v2.16b, v18.16b\n"
+                "bif v0.16b, v2.16b, v18.16b\n" // apply flip where applicable
                 "bif v1.16b, v3.16b, v19.16b\n"
                 "and v6.16b, v6.16b, %[bgnumBit].16b\n"
                 "and v7.16b, v7.16b, %[bgnumBit].16b\n"
-                "cmeq v2.16b, v0.16b, #0\n"
-                "cmeq v6.16b, v6.16b, #0\n"
+                "cmeq v2.16b, v0.16b, #0\n" // transparency mask (per tile)
+                "cmeq v6.16b, v6.16b, #0\n" // transparency mask (window)
                 "cmeq v3.16b, v1.16b, #0\n"
                 "cmeq v7.16b, v7.16b, #0\n"
-                "and v4.16b, v4.16b, %[extpalMask].16b\n"
+                "and v4.16b, v4.16b, %[extpalMask].16b\n" // ignore extpal data in tile if extpal is disabled
                 "and v5.16b, v5.16b, %[extpalMask].16b\n"
-                "orr v2.16b, v2.16b, v6.16b\n"
+                "orr v2.16b, v2.16b, v6.16b\n" // combine transparency masks
                 "orr v3.16b, v3.16b, v7.16b\n"
-                "add v4.16b, v4.16b, %[palOffset].16b\n"
+                "add v4.16b, v4.16b, %[palOffset].16b\n" // make final palette offset
                 "add v5.16b, v5.16b, %[palOffset].16b\n"
 
                 weavePixels("v4", "v5")
@@ -557,7 +664,7 @@ void GPU2DNeon::DrawBG_Text(u32 line, u32 bgnum)
     }
 void GPU2DNeon::DrawSprites(u32 line)
 {
-    /*if (line == 0)
+    if (line == 0)
     {
         // reset those counters here
         // TODO: find out when those are supposed to be reset
@@ -570,11 +677,18 @@ void GPU2DNeon::DrawSprites(u32 line)
     }
 
     NumSprites[0] = NumSprites[1] = NumSprites[2] = NumSprites[3] = 0;
-    memset(OBJLine, 0, (256 + 8*2)*4);
-    memset(OBJWindow, 0, 256 + 8*2);
+    memset(OBJLine, 0, 272*4);
+    memset(OBJWindow, 0, 272);
+
+    NumSprites[0] = 1;
+    for (int i = 10; i < 20; i++)
+    {
+        OBJLine[i] = 0x24000301;
+    }
+
     if (!(DispCnt & 0x1000)) return;
 
-    memset(OBJIndex, 0xFF, 256 + 8*2);
+    memset(OBJIndex, 0xFF, 272);
 
     u16* oam = (u16*)&GPU::OAM[Num ? 0x400 : 0];
 
@@ -640,7 +754,7 @@ void GPU2DNeon::DrawSprites(u32 line)
 
                 //DoDrawSprite(Rotscale, sprnum, boundwidth, boundheight, width, height, xpos, ypos);
 
-                NumSprites[(bgnum - 0xC00) / 0x400]++;
+                NumSprites[bgnum / 0x0400]++;
             }
             else
             {
@@ -660,18 +774,13 @@ void GPU2DNeon::DrawSprites(u32 line)
                 if (xpos <= -width)
                     continue;
 
-                DoDrawSprite(Normal, sprnum, width, height, xpos, ypos);
+                //DoDrawSprite(Normal, sprnum, width, height, xpos, ypos);
 
-                NumSprites[(bgnum - 0xC00) / 0x400]++;
+                NumSprites[bgnum / 0x0400]++;
             }
         }
-    }*/
+    }
 }
-
-/*
-    Neue Idee!!!!!!!!
-        alles wird erst am Ende in einem Schritt palettiert
-*/
 
 template<bool window>
 void GPU2DNeon::DrawSprite_Normal(u32 num, u32 width, u32 height, s32 xpos, s32 ypos)
@@ -679,42 +788,46 @@ void GPU2DNeon::DrawSprite_Normal(u32 num, u32 width, u32 height, s32 xpos, s32 
     u16* oam = (u16*)&GPU::OAM[Num ? 0x400 : 0];
     u16* attrib = &oam[num * 4];
 
-    u32 pixelattr = ((attrib[2] & 0x0C00) << 6) | 0xC0000;
+    u8 pixelattr = ((attrib[2] & 0x0C00) >> 10) | 0x4;
     u32 tilenum = attrib[2] & 0x03FF;
     u32 spritemode = window ? 0 : ((attrib[0] >> 10) & 0x3);
 
     u32 wmask = width - 8; // really ((width - 1) & ~0x7)
 
     if ((attrib[0] & 0x1000) && !window)
-    {
-        // apply Y mosaic
-        pixelattr |= 0x100000;
-    }
+        pixelattr |= 0x8;
 
     // yflip
     if (attrib[1] & 0x2000)
         ypos = height-1 - ypos;
 
+    // adjust to be a multiple of 8
+    // xpos includes the 8px padding
     u32 xoff;
     u32 xend = width;
     if (xpos >= 0)
     {
         xoff = 0;
         if ((xpos+xend) > 256)
-            xend = 256 - xpos + (xoff & 0x7);
+            xend = 256 + (xpos & 0x7) - xpos;
+
+        xpos += 8;
     }
     else
     {
-        xoff = -(xpos & 0x7) - xpos;
-        xpos = -(xpos & 0x7);
+        u32 tileoff = xpos & 0x7;
+        if (tileoff == 0)
+            tileoff = 8;
+
+        xoff = tileoff - 8 - xpos;
+        xpos = tileoff;
     }
-    xpos += 8;
+
+    u16 color = 0; // transparent in all cases
 
     if (spritemode == 3)
     {
         // bitmap sprite
-
-        u16 color = 0; // transparent in all cases
 
         u32 alpha = attrib[2] >> 12;
         if (!alpha) return;
@@ -802,8 +915,8 @@ void GPU2DNeon::DrawSprite_Normal(u32 num, u32 width, u32 height, s32 xpos, s32 
             tilenum += ((ypos >> 3) * 0x20);
         }
 
-        if (spritemode == 1) pixelattr |= 0x80000000;
-        else                 pixelattr |= 0x10000000;
+        /*if (spritemode == 1) pixelattr |= 0x80000000;
+        else                 pixelattr |= 0x10000000;*/
 
         if (attrib[0] & 0x2000)
         {
@@ -813,47 +926,106 @@ void GPU2DNeon::DrawSprite_Normal(u32 num, u32 width, u32 height, s32 xpos, s32 
             pixelsaddr += ((ypos & 0x7) << 3);
             s32 pixelstride;
 
-            if (!window)
-            {
-                if (!(DispCnt & 0x80000000))
-                    pixelattr |= 0x1000;
-                else
-                    pixelattr |= ((attrib[2] & 0xF000) >> 4);
-            }
-
-            /*if (attrib[1] & 0x1000) // xflip
+            if (attrib[1] & 0x1000) // xflip
             {
                 pixelsaddr += (((width-1) & wmask) << 3);
                 pixelsaddr += ((width-1) & 0x7);
                 pixelsaddr -= ((xoff & wmask) << 3);
                 pixelsaddr -= (xoff & 0x7);
-                pixelstride = -1;
+                pixelstride = -64;
             }
             else
-            {*/
+            {
                 pixelsaddr += ((xoff & wmask) << 3);
                 pixelsaddr += (xoff & 0x7);
-                pixelstride = 1;
-            //}
-
-            for (; xoff < xend; )
-            {
-                u64 pixels = GPU::ReadVRAM_OBJ<u64>(pixelsaddr);
-
-                asm volatile (
-                    "dup v0.2d, %[pixels]\n"
-                    "\n"
-                    :
-                    :
-                        [pixels] "r" (pixels)
-                    :
-                        "q0", "q1", "q2"
-                );
-
-                pixelsaddr += 56;
-                xoff += 8;
-                xpos += 8;
+                pixelstride = 64;
             }
+
+            u32 xleft = xend - xoff;
+            u8* dst = &OBJLine[xpos];
+            u8* objindices = &OBJIndex[xpos];
+            u8* pixels = GPU::GetOBJCachePtr(Num, pixelsaddr, xend * 64);
+
+            u8 paletteIndex = 0;
+            if (!window)
+            {
+                if (DispCnt & 0x80000000)
+                {
+                    u32 extPalSlot = (attrib[2] & 0xF000) >> 12;
+
+                    paletteIndex = (Num ? GPU::FastPalExtBOffset : GPU::FastPalExtAOffset)
+                        + GPU::FastPalExtBGSize + extPalSlot;
+                    NextOBJExtPalUsed |= (1 << ((Num ? 0 : 16) + extPalSlot));
+                }
+                else
+                    paletteIndex = Num ? 1 : 3;
+            }
+
+            /*asm volatile
+            (
+            "%=thirtytwo\n"
+                "ld1 {v6.16b, v7.16b}, [%[objindices]]\n"
+                "ld4 {v16.16b - v19.16b}, [%[dst]]\n"
+                "add x8, %[dst], #4*16\n"
+                "ld4 {v20.16b - v23.16b}, [x8]\n"
+                // load the pixels
+                "ld1 {v0.2d}[0], [%[pixels]]\n"
+                "add %[pixels], %[pixels], %[pixelstride]\n"
+                "ld1 {v0.2d}[1], [%[pixelsptr]]\n"
+                "add %[pixels], %[pixels], %[pixelstride]\n"
+                "ld1 {v1.2d}[0], [%[pixels]]\n"
+                "add %[pixels], %[pixels], %[pixelstride]\n"
+                "ld1 {v1.2d}[1], [%[pixels]]\n"
+
+                "rev64 v2.16b, v0.16b\n"
+                "rev64 v3.16b, v1.16b\n"
+                "cmeq v4.16b, v19.16b, #0\n" // check whether a sprite was drawn here before
+                "bit v0.16b, v2.16b, %[hflip].16b\n" // apply horizontal flip
+                "bit v1.16b, v3.16b, %[hflip].16b\n"
+                "cmeq v5.16b, v23.16b, #0\n"
+                "cmeq v2.16b, v0.16b, #0\n"
+                "cmeq v3.16b, v1.16b, #0\n"
+
+                "bif v19.16b, %[], v4.16b\n"
+                "bif v23.16b, %[], v5.16b\n"
+
+                "and v4.16b, v4.16b, v2.16b\n"
+                "and v5.16b, v5.16b, v3.16b\n"
+
+                "bif v16.16b, v0.16b, v2.16b\n"
+                "bif v17.16b, %[paletteIndexPrimary].16b, v2.16b\n"
+                "bif v18.16b, %[paletteIndexSecondary].16b, v2.16b\n"
+                "bif v19.16b, %[pixelattr].16b, v2.16b\n"
+
+                "bif v6.16b, %[index].16b, v4.16b\n"
+                "bif v7.16b, %[index].16b, v5.16b\n"
+
+                "bif v20.16b, v1.16b, v3.16b\n"
+                "bif v21.16b, %[paletteIndexPrimary].16b, v3.16b\n"
+                "bif v22.16b, %[paletteIndexSecondary].16b, v3.16b\n"
+                "bif v23.16b, %[pixelattr].16b, v3.16b\n"
+
+                
+
+
+                :
+                    
+                    [dst] "+r" (dst),
+                    [pixels] "+r" (pixelsptr),
+                    [xleft] "+r" (xend),
+                    [objindices] "+r" (objindices)
+                :
+                    [hflip] "w" (vdupq_n_u8(attrib[1] & 0x1000 ? 0xFF : 0x0)),
+                    [pixelstride] "r" (pixelstride),
+                    [index] "w" (vdupq_n_u8(num)),
+                    [paletteIndexPrimary] "w" (vdupq_n_u8(paletteIndex)),
+                    [paletteIndexSecondary] "w" (vdupq_n_u8(0)),
+                    [pixelattr] "w" (vdupq_n_u8(pixelattr)),
+                :
+                    "x8", "x9", "x10",
+                    "q0", "q1", "q2", "q3", "q4", "q5", "q6", "q7",
+                    "q16", "q17", "q18", "q19", "q20", "q21", "q22", "q23"
+            );*/
 
             /*for (; xoff < xend;)
             {
@@ -912,10 +1084,6 @@ void GPU2DNeon::DrawSprite_Normal(u32 num, u32 width, u32 height, s32 xpos, s32 
                 pixelstride = 1;
             }
 
-            for (; xoff < xend & ~0x7;)
-            {
-
-            }
             /*for (; xoff < xend;)
             {
                 if (attrib[1] & 0x1000)

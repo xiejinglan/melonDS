@@ -207,6 +207,9 @@ public:
 private:
     u32 NumSprites[4];
 
+    u32 OBJExtPalUsed;
+    u32 OBJExtPalStatus;
+    u32 NextOBJExtPalUsed;
     u64 BGExtPalUsed;
     u64 BGExtPalStatus;
 
@@ -222,6 +225,8 @@ private:
 
     template<u32 bgmode> void DrawScanlineBGMode(u32 line);
     void DrawScanline_BGOBJ(u32 line);
+
+    void InterleaveSprites(u32 prio);
 
     template <bool mosaic> void DrawBG_Text(u32 line, u32 bgnum);
 
