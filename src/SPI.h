@@ -36,7 +36,7 @@ namespace SPI_TSC
 {
 
 void SetTouchCoords(u16 x, u16 y);
-void MicInputFrame(s16* data, int samples);
+void MicInputFrame(const s16* data, int samples);
 
 }
 

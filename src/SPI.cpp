@@ -502,7 +502,7 @@ void SetTouchCoords(u16 x, u16 y)
     TouchY <<= 4;
 }
 
-void MicInputFrame(s16* data, int samples)
+void MicInputFrame(const s16* data, int samples)
 {
     if (!data)
     {

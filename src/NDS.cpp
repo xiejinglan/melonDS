@@ -1029,7 +1029,7 @@ void SetLidClosed(bool closed)
     }
 }
 
-void MicInputFrame(s16* data, int samples)
+void MicInputFrame(const s16* data, int samples)
 {
     return SPI_TSC::MicInputFrame(data, samples);
 }
@@ -1684,7 +1684,7 @@ u8 ARM9Read8(u32 addr)
 
     case 0x07000000:
         if (!(PowerControl9 & ((addr & 0x400) ? (1<<9) : (1<<1)))) return 0;
-        return *(u8*)&GPU::OAM[addr & 0x7FF];
+        return GPU::ReadVRAM_OAM<u8>(addr);
 
     case 0x08000000:
     case 0x09000000:
@@ -1749,7 +1749,7 @@ u16 ARM9Read16(u32 addr)
 
     case 0x07000000:
         if (!(PowerControl9 & ((addr & 0x400) ? (1<<9) : (1<<1)))) return 0;
-        return *(u16*)&GPU::OAM[addr & 0x7FF];
+        return GPU::ReadVRAM_OAM<u16>(addr);
 
     case 0x08000000:
     case 0x09000000:
@@ -1814,7 +1814,7 @@ u32 ARM9Read32(u32 addr)
 
     case 0x07000000:
         if (!(PowerControl9 & ((addr & 0x400) ? (1<<9) : (1<<1)))) return 0;
-        return *(u32*)&GPU::OAM[addr & 0x7FF];
+        return GPU::ReadVRAM_OAM<u32>(addr);
 
     case 0x08000000:
     case 0x09000000:
@@ -1924,7 +1924,7 @@ void ARM9Write16(u32 addr, u16 val)
 
     case 0x07000000:
         if (!(PowerControl9 & ((addr & 0x400) ? (1<<9) : (1<<1)))) return;
-        *(u16*)&GPU::OAM[addr & 0x7FF] = val;
+        GPU::WriteVRAM_OAM(addr, val);
         return;
 
     case 0x08000000:
@@ -1990,7 +1990,7 @@ void ARM9Write32(u32 addr, u32 val)
 
     case 0x07000000:
         if (!(PowerControl9 & ((addr & 0x400) ? (1<<9) : (1<<1)))) return;
-        *(u32*)&GPU::OAM[addr & 0x7FF] = val;
+        GPU::WriteVRAM_OAM(addr, val);
         return;
 
     case 0x08000000:

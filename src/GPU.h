@@ -45,6 +45,8 @@ const int FastPalExtAOffset = 4;
 const int FastPalExtBOffset = 4 + 4 * 16 + 16;
 const int FastPalExtBGSize = 4 * 16;
 extern u8 Palette[FastPaletteSize];
+
+extern u32 OAMStatus;
 #endif
 extern u8 OAM[2*1024];
 
@@ -303,6 +305,10 @@ void WriteVRAM_AOBJ(u32 addr, T val)
 {
     u32 mask = VRAMMap_AOBJ[(addr >> 14) & 0xF];
 
+#ifdef NEONGPU_ENABLED
+    *(T*)&VRAMFlat_AOBJ[addr & 0x3FFFF] = val;
+#endif
+
     if (mask & (1<<0)) *(T*)&VRAM_A[addr & 0x1FFFF] = val;
     if (mask & (1<<1)) *(T*)&VRAM_B[addr & 0x1FFFF] = val;
     if (mask & (1<<4)) *(T*)&VRAM_E[addr & 0xFFFF] = val;
@@ -361,6 +367,10 @@ template<typename T>
 void WriteVRAM_BOBJ(u32 addr, T val)
 {
     u32 mask = VRAMMap_BOBJ[(addr >> 14) & 0x7];
+
+#ifdef NEONGPU_ENABLED
+    *(T*)&VRAMFlat_BOBJ[addr & 0x1FFFF] = val;
+#endif
 
     if (mask & (1<<3)) *(T*)&VRAM_D[addr & 0x1FFFF] = val;
     if (mask & (1<<8)) *(T*)&VRAM_I[addr & 0x3FFF] = val;
@@ -434,6 +444,22 @@ T ReadVRAM_TexPal(u32 addr)
 
     return ret;
 }
+
+template<typename T>
+T ReadVRAM_OAM(u32 addr)
+{
+    return *(T*)&OAM[addr & 0x7FF];
+}
+
+template<typename T>
+void WriteVRAM_OAM(u32 addr, T val)
+{
+    *(T*)&OAM[addr & 0x7FF] = val;
+#ifdef NEONGPU_ENABLED
+    OAMStatus &= ~(1 << (addr >> 10));
+#endif
+}
+
 
 void SetPowerCnt(u32 val);
 

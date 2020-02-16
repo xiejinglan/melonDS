@@ -41,6 +41,8 @@ u16 DispStat[2], VMatch[2];
 u8 Palette[2*1024];
 #else
 u8 Palette[FastPaletteSize];
+
+u32 OAMStatus;
 #endif
 u8 OAM[2*1024];
 
@@ -161,6 +163,8 @@ void Reset()
     VRAMFlat_BBGStatus = 0;
     VRAMFlat_AOBJStatus = 0;
     VRAMFlat_BOBJStatus = 0;
+
+    OAMStatus = 0;
 #endif
 
     memset(VRAMCNT, 0, 9);
@@ -291,6 +295,8 @@ void DoSavestate(Savestate* file)
     VRAMFlat_BBGStatus = 0;
     VRAMFlat_AOBJStatus = 0;
     VRAMFlat_BOBJStatus = 0;
+
+    OAMStatus = 0;
 #endif
 }
 

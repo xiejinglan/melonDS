@@ -8,6 +8,8 @@ SET(SOURCES_SWITCH
     Platform.cpp
     profiler.cpp
 
+    dr_wav.cpp
+
     imgui/imgui_draw.cpp
     imgui/imgui_widgets.cpp
     imgui/imgui.cpp

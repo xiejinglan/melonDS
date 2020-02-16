@@ -205,13 +205,17 @@ public:
     void BGDirty();
     void OBJDirty();
 private:
-    u32 NumSprites[4];
-
-    u32 OBJExtPalUsed;
-    u32 OBJExtPalStatus;
-    u32 NextOBJExtPalUsed;
+    u16 OBJExtPalUsed;
+    u16 OBJExtPalStatus;
     u64 BGExtPalUsed;
     u64 BGExtPalStatus;
+
+    bool SemiTransSprites;
+
+    u32 NumSprites[4];
+
+    u32 NumSpritesPerLayer[4];
+    u8 SpriteCache[4][128];
 
     u32* _3DLine;
 
@@ -223,13 +227,26 @@ private:
 
     void EnsurePaletteCoherent();
 
+    void PalettiseRange(u32 start);
+
     template<u32 bgmode> void DrawScanlineBGMode(u32 line);
+    void DrawScanlineBGMode6(u32 line);
+    void DrawScanlineBGMode7(u32 line);
     void DrawScanline_BGOBJ(u32 line);
+
+    template <bool enableSpriteBlend, bool enable3DBlend, int secondSrcBlend> void ApplyColorEffect();
+
+    void DoCapture(u32 line, u32 width);
 
     void InterleaveSprites(u32 prio);
 
-    template <bool mosaic> void DrawBG_Text(u32 line, u32 bgnum);
+    template<bool mosaic> void DrawBG_Text(u32 line, u32 bgnum);
+    template<bool mosaic> void DrawBG_Affine(u32 line, u32 bgnum);
+    template<bool mosaic> void DrawBG_Extended(u32 line, u32 bgnum);
+    void DrawBG_3D();
+    template<bool mosaic> void DrawBG_Large(u32 line);
 
+    template<bool window> void DrawSprite_Rotscale(u32 num, u32 boundwidth, u32 boundheight, u32 width, u32 height, s32 xpos, s32 ypos);
     template<bool window> void DrawSprite_Normal(u32 num, u32 width, u32 height, s32 xpos, s32 ypos);
 };
 

@@ -1819,13 +1819,10 @@ void CmdFIFOWrite(CmdFIFOEntry& entry)
 {
     if (CmdFIFO->IsEmpty() && !CmdPIPE->IsFull())
     {
-        PROFILER_SECTION(cmdPipeNotFull)
         CmdPIPE->Write(entry);
-        PROFILER_END_SECTION
     }
     else
     {
-        PROFILER_SECTION(cmdFifoWrite)
         if (CmdFIFO->IsFull())
         {
             // store it to the stall queue. stall the system.
@@ -1834,12 +1831,10 @@ void CmdFIFOWrite(CmdFIFOEntry& entry)
 
             CmdStallQueue->Write(entry);
             NDS::GXFIFOStall();
-            PROFILER_END_SECTION
             return;
         }
 
         CmdFIFO->Write(entry);
-        PROFILER_END_SECTION
     }
 
     GXStat |= (1<<27);
@@ -2673,6 +2668,8 @@ void WriteToGXFIFO(u32 val)
     else
         ParamCount++;
 
+    PROFILER_SECTION(writetogxfifo)
+    
     for (;;)
     {
         if ((CurCommand & 0xFF) || (NumCommands == 4 && CurCommand == 0))
@@ -2695,6 +2692,8 @@ void WriteToGXFIFO(u32 val)
         if (ParamCount < TotalParams)
             break;
     }
+
+    PROFILER_END_SECTION
 }
 
 

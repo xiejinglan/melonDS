@@ -2240,7 +2240,8 @@ void GPU2DRegular::DrawBG_Large(u32 line) // BG is always BG2
 // * bit0-15: color (bit15=1: direct color, bit15=0: palette index, bit12=0 to indicate extpal)
 // * bit16-17: BG-relative priority
 // * bit18: non-transparent sprite pixel exists here
-// * bit19: X mosaic should be applied here
+// * bit19: some sprite pixel (transparent or not) exists here
+// * bit20: X mosaic should be applied here (not bit19 as it said here by mistake before)
 // * bit24-31: compositor flags
 
 void GPU2DRegular::ApplySpriteMosaicX()

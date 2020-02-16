@@ -23,6 +23,8 @@
 #include "imgui/imgui.h"
 #include "imgui/imgui_impl_opengl3.h"
 
+#include "dr_wav.h"
+
 #include "compat_switch.h"
 
 #include "profiler.h"
@@ -486,12 +488,248 @@ const u32 keyMappings[] = {
     KEY_Y
 };
 
+
+static u64 MicWavLength;
+static u64 MicBufferReadPos;
+static s16* MicWavBuffer = NULL;
+
+void loadMicSample()
+{
+    unsigned int channels, sampleRate;
+    drwav_uint64 totalSamples;
+    drwav_int16* result = drwav_open_file_and_read_pcm_frames_s16("/melonds/micsample.wav", 
+        &channels, &sampleRate, &totalSamples, NULL);
+    
+    const u64 dstfreq = 44100;
+
+    if (result && channels == 1 && totalSamples >= 735 && sampleRate == dstfreq)
+    {
+        MicWavBuffer = result;
+        MicWavLength = totalSamples;
+    }
+}
+
+void freeMicSample()
+{
+    free(MicWavBuffer);
+}
+
+void feedMicAudio(u32 state)
+{
+    if (!MicWavBuffer)
+        return;
+    if (state == 0)
+    {
+        NDS::MicInputFrame(NULL, 0);
+        return;
+    }
+    if ((MicBufferReadPos + 735) > MicWavLength)
+    {
+        s16 tmp[735];
+        u32 len1 = MicWavLength - MicBufferReadPos;
+        memcpy(&tmp[0], &MicWavBuffer[MicBufferReadPos], len1*sizeof(s16));
+        memcpy(&tmp[len1], &MicWavBuffer[0], (735 - len1)*sizeof(s16));
+
+        NDS::MicInputFrame(tmp, 735);
+        MicBufferReadPos = 735 - len1;
+    }
+    else
+    {
+        NDS::MicInputFrame(&MicWavBuffer[MicBufferReadPos], 735);
+        MicBufferReadPos += 735;
+    }
+}
+
 static bool running = true;
 static bool paused = true;
 static void* audMemPool = NULL;
 static AudioDriver audDrv;
 
 const int AudioSampleSize = 768 * 2 * sizeof(s16);
+
+/*void LoadState(int slot)
+{
+    int prevstatus = EmuRunning;
+    EmuRunning = 2;
+    while (EmuStatus != 2);
+
+    char filename[1024];
+
+    if (slot > 0)
+    {
+        GetSavestateName(slot, filename, 1024);
+    }
+    else
+    {
+        char* file = uiOpenFile(MainWindow, "melonDS savestate (any)|*.ml1;*.ml2;*.ml3;*.ml4;*.ml5;*.ml6;*.ml7;*.ml8;*.mln", Config::LastROMFolder);
+        if (!file)
+        {
+            EmuRunning = prevstatus;
+            return;
+        }
+
+        strncpy(filename, file, 1023);
+        filename[1023] = '\0';
+        uiFreeText(file);
+    }
+
+    if (!Platform::FileExists(filename))
+    {
+        char msg[64];
+        if (slot > 0) sprintf(msg, "State slot %d is empty", slot);
+        else          sprintf(msg, "State file does not exist");
+        OSD::AddMessage(0xFFA0A0, msg);
+
+        EmuRunning = prevstatus;
+        return;
+    }
+
+    u32 oldGBACartCRC = GBACart::CartCRC;
+
+    // backup
+    Savestate* backup = new Savestate("timewarp.mln", true);
+    NDS::DoSavestate(backup);
+    delete backup;
+
+    bool failed = false;
+
+    Savestate* state = new Savestate(filename, false);
+    if (state->Error)
+    {
+        delete state;
+
+        uiMsgBoxError(MainWindow, "Error", "Could not load savestate file.");
+
+        // current state might be crapoed, so restore from sane backup
+        state = new Savestate("timewarp.mln", false);
+        failed = true;
+    }
+
+    NDS::DoSavestate(state);
+    delete state;
+
+    if (!failed)
+    {
+        if (Config::SavestateRelocSRAM && ROMPath[0][0]!='\0')
+        {
+            strncpy(PrevSRAMPath[0], SRAMPath[0], 1024);
+
+            strncpy(SRAMPath[0], filename, 1019);
+            int len = strlen(SRAMPath[0]);
+            strcpy(&SRAMPath[0][len], ".sav");
+            SRAMPath[0][len+4] = '\0';
+
+            NDS::RelocateSave(SRAMPath[0], false);
+        }
+
+        bool loadedPartialGBAROM = false;
+
+        // in case we have a GBA cart inserted, and the GBA ROM changes
+        // due to having loaded a save state, we do not want to reload
+        // the previous cartridge on reset, or commit writes to any
+        // loaded save file. therefore, their paths are "nulled".
+        if (GBACart::CartInserted && GBACart::CartCRC != oldGBACartCRC)
+        {
+            ROMPath[1][0] = '\0';
+            SRAMPath[1][0] = '\0';
+            loadedPartialGBAROM = true;
+        }
+
+        char msg[64];
+        if (slot > 0) sprintf(msg, "State loaded from slot %d%s",
+                        slot, loadedPartialGBAROM ? " (GBA ROM header only)" : "");
+        else          sprintf(msg, "State loaded from file%s",
+                        loadedPartialGBAROM ? " (GBA ROM header only)" : "");
+        OSD::AddMessage(0, msg);
+
+        SavestateLoaded = true;
+        uiMenuItemEnable(MenuItem_UndoStateLoad);
+    }
+
+    EmuRunning = prevstatus;
+}
+
+int SaveState(int slot)
+{
+    char filename[1024];
+
+    if (slot > 0)
+    {
+        GetSavestateName(slot, filename, 1024);
+    }
+    else
+    {
+        char* file = uiSaveFile(MainWindow, "melonDS savestate (*.mln)|*.mln", Config::LastROMFolder);
+        if (!file)
+        {
+            EmuRunning = prevstatus;
+            return;
+        }
+
+        strncpy(filename, file, 1023);
+        filename[1023] = '\0';
+        uiFreeText(file);
+    }
+
+    Savestate* state = new Savestate(filename, true);
+    if (state->Error)
+    {
+        delete state;
+
+        return 0;
+    }
+    else
+    {
+        NDS::DoSavestate(state);
+        delete state;
+
+        if (slot > 0)
+            uiMenuItemEnable(MenuItem_LoadStateSlot[slot-1]);
+
+        if (Config::SavestateRelocSRAM && ROMPath[0][0]!='\0')
+        {
+            strncpy(SRAMPath[0], filename, 1019);
+            int len = strlen(SRAMPath[0]);
+            strcpy(&SRAMPath[0][len], ".sav");
+            SRAMPath[0][len+4] = '\0';
+
+            NDS::RelocateSave(SRAMPath[0], true);
+        }
+    }
+
+    char msg[64];
+    if (slot > 0) sprintf(msg, "State saved to slot %d", slot);
+    else          sprintf(msg, "State saved to file");
+    OSD::AddMessage(0, msg);
+
+    EmuRunning = prevstatus;
+}
+
+void UndoStateLoad()
+{
+    if (!SavestateLoaded) return;
+
+    int prevstatus = EmuRunning;
+    EmuRunning = 2;
+    while (EmuStatus != 2);
+
+    // pray that this works
+    // what do we do if it doesn't???
+    // but it should work.
+    Savestate* backup = new Savestate("timewarp.mln", false);
+    NDS::DoSavestate(backup);
+    delete backup;
+
+    if (ROMPath[0][0]!='\0')
+    {
+        strncpy(SRAMPath[0], PrevSRAMPath[0], 1024);
+        NDS::RelocateSave(SRAMPath[0], false);
+    }
+
+    OSD::AddMessage(0, "State load undone");
+
+    EmuRunning = prevstatus;
+}*/
 
 void setupAudio()
 {
@@ -592,15 +830,28 @@ void audioOutput(void *args)
 
 u64 sectionStartTick;
 u64 sectionTicksTotal;
+int entered = 0;
 
 void EnterProfileSection()
 {
+    entered++;
     sectionStartTick = armGetSystemTick();
 }
 
 void CloseProfileSection()
 {
     sectionTicksTotal += armGetSystemTick() - sectionStartTick;
+}
+
+ClkrstSession cpuOverclockSession;
+bool usePCV;
+void onAppletHook(AppletHookType hook, void *param)
+{
+    if (hook == AppletHookType_OnOperationMode || hook == AppletHookType_OnPerformanceMode
+        || hook == AppletHookType_OnRestart || hook == AppletHookType_OnExitRequest)
+    {
+        applyOverclock(usePCV, &cpuOverclockSession, Config::SwitchOverclock);
+    }
 }
 
 const int clockSpeeds[] = { 1020000000, 1224000000, 1581000000, 1785000000 };
@@ -628,10 +879,15 @@ int main(int argc, char* argv[])
 
     gladLoadGL();
 
+    AppletHookCookie aptCookie;
+    appletLockExit();
+    appletHook(&aptCookie, onAppletHook, NULL);
+
     Config::Load();
 
-    bool usePCV = hosversionBefore(8, 0, 0);
-    ClkrstSession cpuOverclockSession;
+    loadMicSample();
+
+    usePCV = hosversionBefore(8, 0, 0);
     if (usePCV)
     {
         pcvInitialize();
@@ -765,8 +1021,8 @@ int main(int argc, char* argv[])
         closedir(dir);
     }
 
-    uint32_t microphoneNoise = 314159265;
     bool lidClosed = false;
+    u32 microphoneState = 0;
 
     while (appletMainLoop())
     {
@@ -776,6 +1032,7 @@ int main(int argc, char* argv[])
         u32 keysUp = hidKeysUp(CONTROLLER_P1_AUTO);
         u32 keysHeld = hidKeysHeld(CONTROLLER_P1_AUTO);
 
+
         if (guiState > 0 && keysDown & KEY_ZL)
         {
             if (!showGui)
@@ -783,6 +1040,9 @@ int main(int argc, char* argv[])
                 for (int i = 0; i < 12; i++)
                     NDS::ReleaseKey(i > 9 ? i + 6 : i);
                 NDS::ReleaseScreen();
+
+                NDS::MicInputFrame(NULL, 0);
+                microphoneState = 0;
             }
 
             showGui ^= true;
@@ -805,22 +1065,11 @@ int main(int argc, char* argv[])
                 }
 
                 if (keysDown & KEY_LSTICK)
-                {
-                    s16 input[1440];
-                    for (int i = 0; i < 1440; i++)
-                    {
-                        microphoneNoise ^= microphoneNoise << 13;
-                        microphoneNoise ^= microphoneNoise >> 17;
-                        microphoneNoise ^= microphoneNoise << 5;
-                        input[i] = microphoneNoise & 0xFFFF;
-                    }
-                    NDS::MicInputFrame(input, 1440);
-                }
+                    microphoneState = 1;
                 if (keysUp & KEY_LSTICK)
-                {
-                    s16 input[1440] = {0};
-                    NDS::MicInputFrame(input, 1440);
-                }
+                    microphoneState = 0;
+
+                feedMicAudio(microphoneState);
             }
             else
             {
@@ -909,6 +1158,7 @@ int main(int argc, char* argv[])
 
         if (guiState == 1)
         {
+            entered = 0;
             sectionTicksTotal = 0;
 
             //arm9BlockFrequency.clear();
@@ -1073,6 +1323,30 @@ int main(int argc, char* argv[])
                 ImGui::Combo("Mode", &perfRecordMode, "No comparision\0Write frametimes\0Compare frametimes\0");
             }
             ImGui::End();
+
+            if (ImGui::Begin("Help"))
+            {
+                ImGui::BulletText("Put roms into /roms/nds");
+                ImGui::BulletText("Use the Dpad to navigate the GUI");
+                ImGui::BulletText("Press A to select");
+                ImGui::BulletText("Press B to cancel");
+                ImGui::BulletText("Use Y and...");
+                ImGui::BulletText("L/R to switch between windows");
+                ImGui::BulletText("the left analogstick to move windows");
+                ImGui::BulletText("the Dpad to resize windows");
+            }
+            ImGui::End();
+
+            if (!MicWavBuffer)
+            {
+                if (ImGui::Begin("Couldn't load mic sample"))
+                {
+                    ImGui::BulletText("You can proceed but microphone input won't be available\n");
+                    ImGui::BulletText("Make sure to put the sample into /melonds/micsample.wav");
+                    ImGui::BulletText("The file has to be saved as 44100Hz mono 16-bit signed pcm and be atleast 1/60s long");
+                }
+                ImGui::End();
+            }
         }
 
         if (guiState > 0)
@@ -1105,7 +1379,7 @@ int main(int argc, char* argv[])
 
                 if (ImGui::Begin("Perf", NULL, ImGuiWindowFlags_AlwaysAutoResize))
                 {
-                    ImGui::Text("frametime avg1: %fms avg2: %fms std dev: +/%fms max: %fms", frametimeSum, frametimeSum2, frametimeStddev, frametimeMax);
+                    ImGui::Text("frametime avg1: %fms avg2: %fms std dev: +/%fms max: %fms %d", frametimeSum, frametimeSum2, frametimeStddev, frametimeMax, entered);
                     ImGui::PlotHistogram("Frametime history", frametimeHistogram, 60, 0, NULL, 0.f, 25.f, ImVec2(0, 50.f));
                     
                     ImGui::PlotHistogram("Custom counter", customTimeHistogram, 60, 0, NULL, 0.f, 25.f, ImVec2(0, 50.f));
@@ -1187,6 +1461,7 @@ int main(int argc, char* argv[])
                             perfRecord = NULL;
                         }
                         guiState = 0;
+                        navInput = true;
                     }
                     if (guiState == 1 && ImGui::Button("Pause"))
                         guiState = 2;
@@ -1247,6 +1522,11 @@ int main(int argc, char* argv[])
         clkrstCloseSession(&cpuOverclockSession);
         clkrstExit();
     }
+
+    freeMicSample();
+
+    appletUnhook(&aptCookie);
+    appletUnlockExit();
 
     //close(nxlinkSocket);
 #ifdef GDB_ENABLED
