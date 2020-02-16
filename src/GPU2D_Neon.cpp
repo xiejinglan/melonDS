@@ -1489,7 +1489,7 @@ void GPU2DNeon::DrawBG_Affine(u32 line, u32 bgnum)
         }
 
         uint8x16_t windowMask = vceqzq_u8(vandq_u8(vld1q_u8(&WindowMask[8 + i]), vdupq_n_u8(1 << bgnum)));
-        
+
         moveMask = vornq_u8(vorrq_u8(windowMask, vceqzq_u8(pixels)), moveMask);
 
         DrawPixels(&BGOBJLine[8 + i], moveMask, pixels, vdupq_n_u8(Num ? 2 : 0), vdupq_n_u8(0), vdupq_n_u8(1 << bgnum));
@@ -1785,8 +1785,8 @@ void GPU2DNeon::DrawBG_Extended(u32 line, u32 bgnum)
 
             uint8x16x2_t windowMask = vld1q_u8_x2(&WindowMask[i + 8]);
 
-            moveMask0 = vornq_u8(vorrq_u8(vceqzq_u8(windowMask.val[0]), vceqzq_u8(pixels0)), moveMask0);
-            moveMask1 = vornq_u8(vorrq_u8(vceqzq_u8(windowMask.val[1]), vceqzq_u8(pixels1)), moveMask1);
+            moveMask0 = vornq_u8(vorrq_u8(vceqzq_u8(vandq_u8(windowMask.val[0], vdupq_n_u8(1 << bgnum))), vceqzq_u8(pixels0)), moveMask0);
+            moveMask1 = vornq_u8(vorrq_u8(vceqzq_u8(vandq_u8(windowMask.val[1], vdupq_n_u8(1 << bgnum))), vceqzq_u8(pixels1)), moveMask1);
 
             DrawPixels(&BGOBJLine[8 + i], moveMask0, pixels0, vaddq_u8(vecPaletteOffset, vandq_u8(extpalIndex.val[0], extpalMask)), vdupq_n_u8(0), vdupq_n_u8(1 << bgnum));
             DrawPixels(&BGOBJLine[8 + 16 + i], moveMask1, pixels1, vaddq_u8(vecPaletteOffset, vandq_u8(extpalIndex.val[1], extpalMask)), vdupq_n_u8(0), vdupq_n_u8(1 << bgnum));
