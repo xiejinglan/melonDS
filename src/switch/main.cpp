@@ -1326,7 +1326,7 @@ int main(int argc, char* argv[])
 
             if (ImGui::Begin("Help"))
             {
-                ImGui::BulletText("Put roms into /roms/nds");
+                ImGui::BulletText("Put roms into /roms/ds");
                 ImGui::BulletText("Use the Dpad to navigate the GUI");
                 ImGui::BulletText("Press A to select");
                 ImGui::BulletText("Press B to cancel");
