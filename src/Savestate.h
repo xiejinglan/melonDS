@@ -25,10 +25,18 @@
 #define SAVESTATE_MAJOR 4
 #define SAVESTATE_MINOR 1
 
+#ifdef __LIBRETRO__
+#include <streams/memory_stream.h>
+#endif
+
 class Savestate
 {
 public:
+#ifdef __LIBRETRO__
+    Savestate(void *data, size_t size, bool save);
+#else
     Savestate(const char* filename, bool save);
+#endif
     ~Savestate();
 
     bool Error;
@@ -55,8 +63,19 @@ public:
         return false;
     }
 
+#ifdef __LIBRETRO__
+    uint64_t GetOffset()
+    {
+        return memstream_pos(file);
+    }
+#endif
+
 private:
+#ifdef __LIBRETRO__
+    memstream_t* file;
+#else
     FILE* file;
+#endif
 };
 
 #endif // SAVESTATE_H
