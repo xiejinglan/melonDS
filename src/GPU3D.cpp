@@ -2527,14 +2527,18 @@ void VBlank()
 
 void VCount215()
 {
-    if (GPU::Renderer == 0) SoftRenderer::RenderFrame();
-    else                    GLRenderer::RenderFrame();
+    if (Renderer == 0) SoftRenderer::RenderFrame();
+#ifdef HAVE_OPENGL
+    else               GLRenderer::RenderFrame();
+#endif
 }
 
 u32* GetLine(int line)
 {
-    if (GPU::Renderer == 0) return SoftRenderer::GetLine(line);
-    else                    return GLRenderer::GetLine(line);
+    if (Renderer == 0) return SoftRenderer::GetLine(line);
+#ifdef HAVE_OPENGL
+    else               return GLRenderer::GetLine(line);
+#endif
 }
 
 
