@@ -31,6 +31,12 @@
 #include <rthreads/rsemaphore.h>
 #endif
 
+#ifdef HAVE_LIBNX
+#include <switch.h>
+#define u64 u64_
+#define s64 s64_
+#endif
+
 #include <streams/file_stream.h>
 #include <streams/file_stream_transforms.h>
 
@@ -53,19 +59,19 @@ namespace Platform
 {
     FILE* OpenFile(const char* path, const char* mode, bool mustexist)
     {
-    FILE* ret;
+      FILE* ret;
 
-    if (mustexist)
-    {
-        ret = fopen(path, "rb");
-        if (ret) fclose(ret);
-        ret = fopen(path, mode);
-    }
-    else
-        ret = fopen(path, mode);
+      if (mustexist)
+      {
+         ret = fopen(path, "rb");
+         if (ret) fclose(ret);
+         ret = fopen(path, mode);
+      }
+      else
+         ret = fopen(path, mode);
 
-    return ret;
-}
+      return ret;
+   }
 
    FILE* OpenLocalFile(const char* path, const char* mode)
    {
@@ -84,67 +90,62 @@ namespace Platform
        return;
    }
 
-   void Semaphore_Reset(void *sema)
+   void ThreadEntry(void* param)
    {
-   #ifdef HAVE_THREADS
-      while (ssem_trywait((ssem_t*)sema) == true);
-   #endif
+      printf("thread activated\n");
+      ((void (*)())param)();
    }
 
-   void Semaphore_Post(void *sema)
+   #define STACK_SIZE (1024 * 64)
+
+   int threadNextCore = 1;
+
+   void* Thread_Create(void (*func)())
    {
-   #ifdef HAVE_THREADS
-      ssem_signal((ssem_t*)sema);
-   #endif
+      Thread* thread = new Thread();
+      auto res = threadCreate(thread, ThreadEntry, (void*)func, NULL, STACK_SIZE, 0x30, threadNextCore++);
+      threadStart(thread);
+      printf("%d thread\n", res);
+      return (void*)thread;
    }
 
-   void Semaphore_Wait(void *sema)
+   void Thread_Free(void* thread)
    {
-   #ifdef HAVE_THREADS
-      ssem_wait((ssem_t*)sema);
-   #endif
+      threadClose((Thread*)thread);
+      delete ((Thread*)thread);
    }
 
-   void Semaphore_Free(void *sema)
+   void Thread_Wait(void* thread)
    {
-   #ifdef HAVE_THREADS
-      ssem_t *sem = (ssem_t*)sema;
-      if (sem)
-         ssem_free(sem);
-   #endif
+      threadWaitForExit((Thread*)thread);
    }
 
-   void *Semaphore_Create()
+   void* Semaphore_Create()
    {
-   #ifdef HAVE_THREADS
-      ssem_t *sem = ssem_new(0);
-      if (sem)
-         return sem;
-   #endif
-      return NULL;
+      Semaphore* sema = new Semaphore();
+      semaphoreInit(sema, 0);
+      return (void*)sema;
    }
 
-   void Thread_Free(void *thread)
+   void Semaphore_Free(void* sema)
    {
-   #if HAVE_THREADS
-      sthread_detach((sthread_t*)thread);
-   #endif
+      delete (Semaphore*)sema;
    }
 
-   void *Thread_Create(void (*func)())
+   void Semaphore_Reset(void* sema)
    {
-   #if HAVE_THREADS
-      return (void*)sthread_create((void(*)(void*))func, NULL);
-   #endif
+      while(semaphoreTryWait((Semaphore*)sema));
    }
 
-   void Thread_Wait(void *thread)
+   void Semaphore_Wait(void* sema)
    {
-   #if HAVE_THREADS
-      sthread_join((sthread_t*)thread);
-   #endif
+      semaphoreWait((Semaphore*)sema);
    }
 
+   void Semaphore_Post(void* sema)
+   {
+      semaphoreSignal((Semaphore*)sema);
+   }
 
    bool MP_Init()
    {
