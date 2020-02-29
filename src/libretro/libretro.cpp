@@ -127,8 +127,8 @@ void retro_set_environment(retro_environment_t cb)
 #ifdef JIT_ENABLED
    std::string jit_blocksize = "JIT block size; ";
 
-   static const int MAX_JIT_BLOCKSIZE = 32;
-   static const int DEFAULT_BLOCK_SIZE = 10;
+   static const int MAX_JIT_BLOCKSIZE = 100;
+   static const int DEFAULT_BLOCK_SIZE = 50;
 
    jit_blocksize.append(std::to_string(DEFAULT_BLOCK_SIZE) + "|");
 
