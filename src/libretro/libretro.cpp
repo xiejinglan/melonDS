@@ -143,6 +143,7 @@ void retro_set_environment(retro_environment_t cb)
    }
 #endif
 
+   // TODO: Find an alternative method to not leak the strings needed for opengl resolution / jit blocksize, but its not critical due to the small amount
   static const retro_variable values[] =
    {
       { "melonds_boot_directly", "Boot game directly; enabled|disabled" },
@@ -153,11 +154,11 @@ void retro_set_environment(retro_environment_t cb)
       { "melonds_touch_mode", "Touch mode; disabled|Mouse|Touch" },
 #ifdef HAVE_OPENGL
       { "melonds_opengl_renderer", "OpenGL Renderer (Restart); disabled|enabled" },
-      { "melonds_opengl_resolution", opengl_resolution.c_str() },
+      { "melonds_opengl_resolution", (new std::string(opengl_resolution))->c_str() },
 #endif
 #ifdef JIT_ENABLED
       { "melonds_jit_enable", "JIT Enable (Restart); enabled|disabled" },
-      { "melonds_jit_block_size", jit_blocksize.c_str() },
+      { "melonds_jit_block_size", (new std::string(jit_blocksize))->c_str() },
       { "melonds_jit_branch_optimisations", "JIT Branch optimisations; disabled|enabled" },
       { "melonds_jit_literal_optimisations", "JIT Literal optimisations; disabled|enabled" },
 #endif
