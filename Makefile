@@ -330,7 +330,7 @@ endif
 ifeq ($(DEBUG), 1)
    CXXFLAGS += -O0 -g
 else
-   CXXFLAGS += -O3 # -DNDEBUG
+   CXXFLAGS += -O3 -g # -DNDEBUG
 endif
 
 include Makefile.common

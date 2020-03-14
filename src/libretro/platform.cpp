@@ -96,16 +96,15 @@ namespace Platform
       ((void (*)())param)();
    }
 
-   #define STACK_SIZE (1024 * 64)
+   #define STACK_SIZE (1024 * 128)
 
-   int threadNextCore = 1;
+   int threadNextCore = 0;
 
    void* Thread_Create(void (*func)())
    {
       Thread* thread = new Thread();
-      auto res = threadCreate(thread, ThreadEntry, (void*)func, NULL, STACK_SIZE, 0x30, threadNextCore++);
+      auto res = threadCreate(thread, ThreadEntry, (void*)func, NULL, STACK_SIZE, 0x30, 1 + (threadNextCore++ % 2));
       threadStart(thread);
-      printf("%d thread\n", res);
       return (void*)thread;
    }
 
