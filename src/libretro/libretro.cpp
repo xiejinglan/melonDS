@@ -159,7 +159,7 @@ void retro_set_environment(retro_environment_t cb)
 #ifdef JIT_ENABLED
       { "melonds_jit_enable", "JIT Enable (Restart); enabled|disabled" },
       { "melonds_jit_block_size", (new std::string(jit_blocksize))->c_str() },
-      { "melonds_jit_branch_optimisations", "JIT Branch optimisations; disabled|enabled" },
+      { "melonds_jit_branch_optimisations", "JIT Branch optimisations; enabled|disabled" },
       { "melonds_jit_literal_optimisations", "JIT Literal optimisations; disabled|enabled" },
 #endif
       { 0, 0 }
