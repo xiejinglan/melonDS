@@ -11,6 +11,7 @@ cmake-build
 
 obj_release
 obj_gdb
+obj_debug
 
 cmake-build-debug
 .idea
