@@ -103,7 +103,7 @@
 namespace GPU3D
 {
 
-const u32 CmdNumParams[256] =
+const u8 CmdNumParams[256] =
 {
     // 0x00
     0,
@@ -1604,7 +1604,8 @@ void SubmitVertex()
     }
 
     VertexPipeline = 7;
-    AddCycles(3);}
+    AddCycles(3);
+}
 
 void CalculateLighting()
 {
@@ -1828,7 +1829,7 @@ void VecTest(u32* params)
 
 
 
-void CmdFIFOWrite(CmdFIFOEntry& entry)
+bool CmdFIFOWrite(CmdFIFOEntry& entry)
 {
     if (CmdFIFO->IsEmpty() && !CmdPIPE->IsFull())
     {
@@ -1844,7 +1845,7 @@ void CmdFIFOWrite(CmdFIFOEntry& entry)
 
             CmdStallQueue->Write(entry);
             NDS::GXFIFOStall();
-            return;
+            return true;
         }
 
         CmdFIFO->Write(entry);
@@ -1862,6 +1863,8 @@ void CmdFIFOWrite(CmdFIFOEntry& entry)
         GXStat |= (1<<0); // box/pos/vec test
         NumTestCommands++;
     }
+
+    return false;
 }
 
 CmdFIFOEntry CmdFIFORead()
@@ -1970,7 +1973,7 @@ void ExecuteCommand()
     ExecParams[ExecParamCount] = entry.Param;
     ExecParamCount++;
 
-    if (ExecParamCount >= CmdNumParams[entry.Command])
+    if (ExecParamCount >= (u32)CmdNumParams[entry.Command])
     {
         /*printf("[GXS:%08X] 0x%02X,  ", GXStat, entry.Command);
         for (int k = 0; k < ExecParamCount; k++) printf("0x%08X, ", ExecParams[k]);
@@ -2486,6 +2489,7 @@ void ExecuteCommand()
             break;
 
         default:
+            PROFILER_COUNTER(unknowngxcommand)
             //printf("!! UNKNOWN GX COMMAND %02X %08X\n", entry.Command, entry.Param);
             break;
         }
@@ -2670,22 +2674,77 @@ u32* GetLine(int line)
 #endif
 }
 
+u32 WriteBatchToGXFIFO(u32* values, u32 count)
+{
+    int i = 0;
+    while (NumCommands > 0 && i < count)
+    {
+        if (WriteToGXFIFO(values[i++]))
+            return i;
+    }
 
-void WriteToGXFIFO(u32 val)
+    for (; i < count; i++)
+    {
+        CurCommand = values[i];
+
+        NumCommands = 4;
+        bool stall = false;
+        do
+        {
+            TotalParams = (u32)CmdNumParams[CurCommand & 0xFF];
+            if (TotalParams)
+            {
+                for (ParamCount = 0; ParamCount < TotalParams; ParamCount++)
+                {
+                    i++;
+                    if (i == count)
+                        return i;
+
+                    CmdFIFOEntry entry;
+                    entry.Command = CurCommand & 0xFF;
+                    entry.Param = values[i];
+                    stall |= CmdFIFOWrite(entry);
+                }
+            }
+            else
+            {
+                CmdFIFOEntry entry;
+                entry.Command = CurCommand & 0xFF;
+                // probably not necessary
+                entry.Param = values[i];
+                stall |= CmdFIFOWrite(entry);
+            }
+
+            CurCommand >>= 8;
+            NumCommands--;
+        } while (CurCommand != 0);
+
+        NumCommands = 0;
+
+        if (stall)
+            return i + 1;
+    }
+
+    return i;
+}
+
+bool WriteToGXFIFO(u32 val)
 {
     if (NumCommands == 0)
     {
         NumCommands = 4;
         CurCommand = val;
         ParamCount = 0;
-        TotalParams = CmdNumParams[CurCommand & 0xFF];
+        TotalParams = (u32)CmdNumParams[CurCommand & 0xFF];
 
-        if (TotalParams > 0) return;
+        if (TotalParams > 0) return false;
     }
     else
         ParamCount++;
 
     PROFILER_SECTION(writetogxfifo)
+
+    bool stall = false;
     
     for (;;)
     {
@@ -2694,7 +2753,7 @@ void WriteToGXFIFO(u32 val)
             CmdFIFOEntry entry;
             entry.Command = CurCommand & 0xFF;
             entry.Param = val;
-            CmdFIFOWrite(entry);
+            stall |= CmdFIFOWrite(entry);
         }
 
         if (ParamCount >= TotalParams)
@@ -2704,13 +2763,14 @@ void WriteToGXFIFO(u32 val)
             if (NumCommands == 0) break;
 
             ParamCount = 0;
-            TotalParams = CmdNumParams[CurCommand & 0xFF];
+            TotalParams = (u32)CmdNumParams[CurCommand & 0xFF];
         }
         if (ParamCount < TotalParams)
             break;
     }
 
     PROFILER_END_SECTION
+    return stall;
 }
 
 
