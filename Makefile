@@ -167,9 +167,9 @@ else ifeq ($(platform), libnx)
    TARGET := $(TARGET_NAME)_libretro_$(platform).a
    DEFINES := -DSWITCH=1 -D__SWITCH__=1 -DHAVE_LIBNX=1
    CFLAGS := -I$(LIBNX)/include/ -I$(PORTLIBS)/include/ -ffunction-sections -fdata-sections -ftls-model=local-exec -specs=$(LIBNX)/switch.specs
-   CFLAGS += -march=armv8-a -mtune=cortex-a57 -mtp=soft -mcpu=cortex-a57+crc+fp+simd
+   CFLAGS += -march=armv8-a+crc+simd -mtune=cortex-a57 -mtp=soft -mcpu=cortex-a57+crc+fp+simd
    fpic := -fPIE -pie
-   CXXFLAGS := $(ASFLAGS) $(CFLAGS)
+   CXXFLAGS := $(ASFLAGS) $(CFLAGS) -fno-rtti -fno-exceptions
    STATIC_LINKING = 1
    HAVE_OPENGL = 1
    HAVE_THREADS = 1
