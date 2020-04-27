@@ -6,6 +6,11 @@
 
 InputState input_state;
 
+bool cursor_enabled(InputState *state)
+{
+   return state->current_touch_mode == TouchMode::Mouse || state->current_touch_mode == TouchMode::Joystick;
+}
+
 void update_input(InputState *state)
 {
    input_poll_cb();
@@ -87,6 +92,16 @@ void update_input(InputState *state)
             {
                state->touching = false;
             }
+
+            break;
+         case TouchMode::Joystick:
+            int16_t joystick_x = input_state_cb(0, RETRO_DEVICE_ANALOG, RETRO_DEVICE_INDEX_ANALOG_RIGHT, RETRO_DEVICE_ID_ANALOG_X) / 2048;
+            int16_t joystick_y = input_state_cb(0, RETRO_DEVICE_ANALOG, RETRO_DEVICE_INDEX_ANALOG_RIGHT, RETRO_DEVICE_ID_ANALOG_Y) / 2048;
+
+            state->touch_x = Clamp(state->touch_x + joystick_x, 0, VIDEO_WIDTH);
+            state->touch_y = Clamp(state->touch_y + joystick_y, 0, VIDEO_HEIGHT);
+
+            state->touching = !!input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R3);
 
             break;
       }

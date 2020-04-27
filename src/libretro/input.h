@@ -8,6 +8,7 @@ enum TouchMode
    Disabled,
    Mouse,
    Touch,
+   Joystick,
 };
 
 struct InputState
@@ -21,6 +22,8 @@ struct InputState
 };
 
 extern InputState input_state;
+
+bool cursor_enabled(InputState *state);
 
 void update_input(InputState *state);
 
