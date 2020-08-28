@@ -72,6 +72,7 @@ static bool using_opengl = false; // if the opengl renderer is currently used
 static bool update_opengl = true; // update the ubo / vao
 
 static bool holding_noise_btn = false;
+static bool swap_screens_btn = false;
 
 enum CurrentRenderer
 {
@@ -84,7 +85,7 @@ static CurrentRenderer current_renderer = CurrentRenderer::None;
 
 #ifdef HAVE_OPENGL
 #include <glsm/glsmsym.h>
-struct retro_hw_render_callback hw_render;
+extern struct retro_hw_render_callback hw_render;
 
 #include "OpenGLSupport.h"
 #include "shaders.h"
@@ -741,8 +742,39 @@ void retro_reset(void)
    NDS::LoadROM(game_path.c_str(), save_path.c_str(), Config::DirectBoot);
 }
 
+static void swap_screens(void)
+{
+   ScreenLayout layout;
+   switch (current_screen_layout)
+   {
+   case ScreenLayout::BottomOnly:
+      layout = ScreenLayout::TopOnly;
+      break;
+   case ScreenLayout::TopOnly:
+      layout = ScreenLayout::BottomOnly;
+      break;
+   case ScreenLayout::BottomTop:
+      layout = ScreenLayout::TopBottom;
+      break;
+   case ScreenLayout::TopBottom:
+      layout = ScreenLayout::BottomTop;
+      break;
+   case ScreenLayout::LeftRight:
+      layout = ScreenLayout::RightLeft;
+      break;
+   case ScreenLayout::RightLeft:
+      layout = ScreenLayout::LeftRight;
+      break;
+   }
+
+   update_screenlayout(layout, &screen_layout_data, Config::_3DRenderer);
+   update_opengl = true;
+}
+
 static void update_input(void)
 {
+   static bool swap_screens_pressed = false;
+
    input_poll_cb();
 
    uint16_t keys = 0;
@@ -772,6 +804,16 @@ static void update_input(void)
    }
 
    holding_noise_btn = !!input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L2);
+   swap_screens_btn = !!input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R2);
+
+   if (swap_screens_btn && !swap_screens_pressed)
+   {
+      swap_screens_pressed = true;
+      swap_screens();
+   }
+   else if (!swap_screens_btn && swap_screens_pressed)
+      swap_screens_pressed = false;
+
 
    if(current_screen_layout != ScreenLayout::TopOnly)
    {
@@ -1234,6 +1276,7 @@ bool retro_load_game(const struct retro_game_info *info)
       { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_X, "X" },
       { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_Y, "Y" },
       { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L2, "Make microphone noise" },
+      { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R2, "Swap screens" },
       { 0 },
    };
 
