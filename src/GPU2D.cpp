@@ -949,7 +949,7 @@ void GPU2D::VBlankEnd()
     //OBJMosaicYMax = OBJMosaicSize[1];
     //OBJMosaicY = 0;
     //OBJMosaicYCount = 0;
-
+#ifdef HAVE_OPENGL
     if (Accelerated)
     {
         if ((Num == 0) && (CaptureCnt & (1<<31)) && (((CaptureCnt >> 29) & 0x3) != 1))
@@ -957,6 +957,7 @@ void GPU2D::VBlankEnd()
             GPU3D::GLRenderer::PrepareCaptureFrame();
         }
     }
+#endif
 }
 
 

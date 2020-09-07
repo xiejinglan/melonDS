@@ -280,6 +280,7 @@ void AssignFramebuffers()
 
 void InitRenderer(int renderer)
 {
+#ifdef HAVE_OPENGL
     if (renderer == 1)
     {
         if (!GLCompositor::Init())
@@ -292,6 +293,7 @@ void InitRenderer(int renderer)
             renderer = 0;
         }
     }
+#endif
 
     if (renderer == 0)
     {
@@ -304,28 +306,36 @@ void InitRenderer(int renderer)
 
 void DeInitRenderer()
 {
+#ifdef HAVE_OPENGL
     if (Renderer == 0)
     {
+#endif
         GPU3D::SoftRenderer::DeInit();
+#ifdef HAVE_OPENGL
     }
     else
     {
         GPU3D::GLRenderer::DeInit();
         GLCompositor::DeInit();
     }
+#endif
 }
 
 void ResetRenderer()
 {
+#ifdef HAVE_OPENGL
     if (Renderer == 0)
     {
+#endif
         GPU3D::SoftRenderer::Reset();
+#ifdef HAVE_OPENGL
     }
     else
     {
         GLCompositor::Reset();
         GPU3D::GLRenderer::Reset();
     }
+#endif
 }
 
 void SetRenderSettings(int renderer, RenderSettings& settings)
@@ -360,15 +370,21 @@ void SetRenderSettings(int renderer, RenderSettings& settings)
     GPU2D_A->SetRenderSettings(accel);
     GPU2D_B->SetRenderSettings(accel);
 
+    printf("%d\n", Renderer);
+
+#ifdef HAVE_OPENGL
     if (Renderer == 0)
     {
+#endif
         GPU3D::SoftRenderer::SetRenderSettings(settings);
+#ifdef HAVE_OPENGL
     }
     else
     {
         GLCompositor::SetRenderSettings(settings);
         GPU3D::GLRenderer::SetRenderSettings(settings);
     }
+#endif
 }
 
 
@@ -1054,8 +1070,9 @@ void StartScanline(u32 line)
             GPU2D_A->VBlank();
             GPU2D_B->VBlank();
             GPU3D::VBlank();
-
+#ifdef HAVE_OPENGL
             if (Accelerated) GLCompositor::RenderFrame();
+#endif
         }
         else if (VCount == 144)
         {
