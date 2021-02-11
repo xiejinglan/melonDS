@@ -48,13 +48,16 @@ namespace NDSCart_SRAMManager
 
     bool Init()
     {
+#ifndef __LIBRETRO__
         SecondaryBufferLock = Platform::Mutex_Create();
+#endif
 
         return true;
     }
 
     void DeInit()
     {
+#ifndef __LIBRETRO__
         if (FlushThreadRunning)
         {
             FlushThreadRunning = false;
@@ -62,6 +65,7 @@ namespace NDSCart_SRAMManager
             Platform::Thread_Free(FlushThread);
             FlushSecondaryBuffer();
         }
+#endif
 
         if (SecondaryBuffer) delete SecondaryBuffer;
         SecondaryBuffer = NULL;
@@ -74,7 +78,9 @@ namespace NDSCart_SRAMManager
         // Flush SRAM in case there is unflushed data from previous state.
         FlushSecondaryBuffer();
 
+#ifndef __LIBRETRO__
         Platform::Mutex_Lock(SecondaryBufferLock);
+#endif
 
         strncpy(Path, path, 1023);
         Path[1023] = '\0';
@@ -91,6 +97,7 @@ namespace NDSCart_SRAMManager
         PreviousFlushVersion = 0;
         TimeAtLastFlushRequest = 0;
 
+#ifndef __LIBRETRO__
         Platform::Mutex_Unlock(SecondaryBufferLock);
 
         if (path[0] != '\0')
@@ -98,18 +105,24 @@ namespace NDSCart_SRAMManager
             FlushThread = Platform::Thread_Create(FlushThreadFunc);
             FlushThreadRunning = true;
         }
+#endif
     }
 
     void RequestFlush()
     {
+#ifndef __LIBRETRO__
         Platform::Mutex_Lock(SecondaryBufferLock);
+#endif
         printf("NDS SRAM: Flush requested\n");
         memcpy(SecondaryBuffer, Buffer, Length);
         FlushVersion++;
         TimeAtLastFlushRequest = time(NULL);
+#ifndef __LIBRETRO__
         Platform::Mutex_Unlock(SecondaryBufferLock);
+#endif
     }
-    
+
+#ifndef __LIBRETRO__
     void FlushThreadFunc()
     {
         for (;;)
@@ -127,7 +140,16 @@ namespace NDSCart_SRAMManager
             FlushSecondaryBuffer();
         }
     }
-    
+#else
+    void Flush()
+    {
+        if (TimeAtLastFlushRequest != 0 && difftime(time(NULL), TimeAtLastFlushRequest) > 2)
+        {
+            FlushSecondaryBuffer();
+        }
+    }
+#endif
+
     void FlushSecondaryBuffer(u8* dst, s32 dstLength)
     {
         // When flushing to a file, there's no point in re-writing the exact same data.
@@ -135,7 +157,9 @@ namespace NDSCart_SRAMManager
         // When flushing to memory, we don't know if dst already has any data so we only check that we CAN flush.
         if (dst && dstLength < SecondaryBufferLength) return;
 
+#ifndef __LIBRETRO__
         Platform::Mutex_Lock(SecondaryBufferLock);
+#endif
         if (dst)
         {
             memcpy(dst, SecondaryBuffer, SecondaryBufferLength);
@@ -152,7 +176,9 @@ namespace NDSCart_SRAMManager
         }
         PreviousFlushVersion = FlushVersion;
         TimeAtLastFlushRequest = 0;
+#ifndef __LIBRETRO__
         Platform::Mutex_Unlock(SecondaryBufferLock);
+#endif
     }
 
     bool NeedsFlush()
