@@ -19,7 +19,14 @@
 #ifndef GPU_H
 #define GPU_H
 
+#ifdef __LIBRETRO__
+#undef FILE
+#endif
 #include <memory>
+#ifdef __LIBRETRO__
+#include <streams/file_stream.h>
+#define FILE RFILE
+#endif
 
 #include "GPU2D.h"
 #include "NonStupidBitfield.h"

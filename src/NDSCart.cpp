@@ -29,6 +29,11 @@
 #include "melonDLDI.h"
 #include "NDSCart_SRAMManager.h"
 
+#ifdef __LIBRETRO__
+#undef __LIBRETRO_SDK_FILE_STREAM_TRANSFORMS_H
+#include <streams/file_stream_transforms.h>
+#endif
+
 namespace NDSCart_SRAM
 {
 

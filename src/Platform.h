@@ -23,6 +23,7 @@
 
 #include <functional>
 #ifdef __LIBRETRO__
+#undef __LIBRETRO_SDK_FILE_STREAM_TRANSFORMS_H
 #include <streams/file_stream.h>
 #include <streams/file_stream_transforms.h>
 
@@ -115,5 +116,9 @@ int LAN_RecvPacket(u8* data);
 void Sleep(u64 usecs);
 
 }
+
+#ifdef __LIBRETRO_
+#undef FILE
+#endif
 
 #endif // PLATFORM_H

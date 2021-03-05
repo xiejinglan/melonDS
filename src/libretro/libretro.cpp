@@ -45,11 +45,12 @@ bool swapped_screens = false;
 bool toggle_swap_screen = false;
 bool swap_screen_toggled = false;
 
+
 enum CurrentRenderer
 {
    None,
    Software,
-   OpenGL,
+   OpenGLRenderer,
 };
 
 static CurrentRenderer current_renderer = CurrentRenderer::None;
@@ -326,7 +327,7 @@ static void check_variables(bool init)
       {
          bool use_opengl = !strcmp(var.value, "enabled");
 
-         if(!init && using_opengl) current_renderer = use_opengl ? CurrentRenderer::OpenGL : CurrentRenderer::Software;
+         if(!init && using_opengl) current_renderer = use_opengl ? CurrentRenderer::OpenGLRenderer : CurrentRenderer::Software;
 
          enable_opengl = use_opengl;
       }
@@ -441,7 +442,7 @@ static void render_frame(void)
          if (enable_opengl && using_opengl)
          {
             // Try to initialize opengl, if it failed fallback to software
-            if (initialize_opengl()) current_renderer = CurrentRenderer::OpenGL;
+            if (initialize_opengl()) current_renderer = CurrentRenderer::OpenGLRenderer;
             else
             {
                using_opengl = false;

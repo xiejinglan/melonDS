@@ -164,10 +164,21 @@ namespace Platform
    #endif
    }
 
-   Thread *Thread_Create(void (*func)())
+   struct ThreadData
+   {
+      std::function<void()> fn;
+   };
+
+   void function_trampoline(void* param) {
+      ThreadData* data = (ThreadData*)param;
+      data->fn();
+      delete data;
+   }
+
+   Thread *Thread_Create(std::function<void()> func)
    {
    #if HAVE_THREADS
-      return (Thread*) sthread_create((void(*)(void*))func, NULL);
+      return (Thread*) sthread_create(function_trampoline, new ThreadData{func});
    #endif
    }
 
