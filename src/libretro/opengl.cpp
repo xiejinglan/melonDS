@@ -302,7 +302,7 @@ void render_opengl_frame(bool sw)
    }
    else
    {
-      GPU::GLCompositor::BindOutputTexture();
+      GPU::CurGLCompositor->BindOutputTexture(frontbuf);
    }
 
    GLint filter = opengl_linear_filtering ? GL_LINEAR : GL_NEAREST;

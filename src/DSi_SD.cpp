@@ -24,6 +24,10 @@
 #include "Platform.h"
 #include "Config.h"
 
+#ifdef __LIBRETRO__
+#undef __LIBRETRO_SDK_FILE_STREAM_TRANSFORMS_H
+#include <streams/file_stream_transforms.h>
+#endif
 
 // observed IRQ behavior during transfers
 //
