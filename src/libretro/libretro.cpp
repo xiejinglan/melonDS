@@ -105,8 +105,29 @@ void retro_get_system_av_info(struct retro_system_av_info *info)
 {
    info->timing.fps            = 32.0f * 1024.0f * 1024.0f / 560190.0f;
    info->timing.sample_rate    = 32.0f * 1024.0f;
-   info->geometry.base_width   = screen_layout_data.buffer_width;
-   info->geometry.base_height  = screen_layout_data.buffer_height;
+   switch (current_screen_layout)
+   {
+      case ScreenLayout::TopBottom:
+      case ScreenLayout::BottomTop:
+	 info->geometry.base_width   = 256;
+	 info->geometry.base_height  = 384;
+         break;
+      case ScreenLayout::LeftRight:
+      case ScreenLayout::RightLeft:
+	 info->geometry.base_width   = 512;
+	 info->geometry.base_height  = 192;
+	 break;
+      case ScreenLayout::TopOnly:
+      case ScreenLayout::BottomOnly:
+	 info->geometry.base_width   = 256;
+	 info->geometry.base_height  = 192;
+	 break;
+      case ScreenLayout::HybridTop:
+      case ScreenLayout::HybridBottom:
+	 info->geometry.base_width   = 769;
+	 info->geometry.base_height  = 384;
+	 break;
+   }
    info->geometry.max_width    = screen_layout_data.buffer_width;
    info->geometry.max_height   = screen_layout_data.buffer_height;
    info->geometry.aspect_ratio = (float)screen_layout_data.buffer_width / (float)screen_layout_data.buffer_height;
