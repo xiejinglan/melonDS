@@ -23,6 +23,14 @@ enum ScreenLayout
    HybridBottom = 7,
 };
 
+
+enum ScreenId
+{
+    Primary = 0,
+    Top = 1,
+    Bottom = 2,
+};
+
 struct ScreenLayoutData
 {
     bool enable_top_screen;
