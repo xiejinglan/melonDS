@@ -19,7 +19,7 @@ extern bool opengl_linear_filtering;
 static bool initialized_glsm;
 static GLuint shader[3];
 static GLuint screen_framebuffer_texture;
-static float screen_vertices[2 * 3 * 2 * 4];
+static float screen_vertices[72];
 static GLuint vao, vbo;
 
 struct
@@ -186,6 +186,23 @@ void setup_opengl_frame_state(void)
    float bottom_screen_y = 0.0f;
    float bottom_screen_scale = 1.0f;
 
+   float primary_x = 0.0f;
+   float primary_y = 0.0f;
+   float primary_tex_v0_x = 0.0f;
+   float primary_tex_v0_y = 0.0f;
+   float primary_tex_v1_x = 0.0f;
+   float primary_tex_v1_y = 0.0f;
+   float primary_tex_v2_x = 0.0f;
+   float primary_tex_v2_y = 0.0f;
+   float primary_tex_v3_x = 0.0f;
+   float primary_tex_v3_y = 0.0f;
+   float primary_tex_v4_x = 0.0f;
+   float primary_tex_v4_y = 0.0f;
+   float primary_tex_v5_x = 0.0f;
+   float primary_tex_v5_y = 0.0f;
+
+   const float pixel_pad = 1.0f / (192 * 2 + 2);
+
    switch (screen_layout_data.displayed_layout)
    {
       case ScreenLayout::TopBottom:
@@ -207,17 +224,39 @@ void setup_opengl_frame_state(void)
          top_screen_y = screen_height; // ditto
          break;
       case ScreenLayout::HybridTop:
-         top_screen_scale = (float)screen_layout_data.hybrid_ratio;
+         primary_x = screen_width * screen_layout_data.hybrid_ratio;
+         primary_y = screen_height * screen_layout_data.hybrid_ratio;
 
-         bottom_screen_x = screen_width * screen_layout_data.hybrid_ratio;
-         bottom_screen_y = screen_height * (screen_layout_data.hybrid_ratio - 1);
+         primary_tex_v0_x = 0.0f;
+         primary_tex_v0_y = 0.0f;
+         primary_tex_v1_x = 0.0f;
+         primary_tex_v1_y = 0.5f - pixel_pad;
+         primary_tex_v2_x = 1.0f;
+         primary_tex_v2_y = 0.5f - pixel_pad;
+         primary_tex_v3_x = 0.0f;
+         primary_tex_v3_y = 0.0f;
+         primary_tex_v4_x = 1.0f;
+         primary_tex_v4_y = 0.0f;
+         primary_tex_v5_x = 1.0f;
+         primary_tex_v5_y = 0.5f - pixel_pad;
 
          break;
       case ScreenLayout::HybridBottom:
-         bottom_screen_scale = (float)screen_layout_data.hybrid_ratio;
+         primary_x = screen_width * screen_layout_data.hybrid_ratio;
+         primary_y = screen_height * screen_layout_data.hybrid_ratio;
 
-         top_screen_x = screen_width * screen_layout_data.hybrid_ratio;
-         top_screen_y = screen_height * (screen_layout_data.hybrid_ratio - 1);
+         primary_tex_v0_x = 0.0f;
+         primary_tex_v0_y = 0.5f + pixel_pad;
+         primary_tex_v1_x = 0.0f;
+         primary_tex_v1_y = 1.0f;
+         primary_tex_v2_x = 1.0f;
+         primary_tex_v2_y = 1.0f;
+         primary_tex_v3_x = 0.0f;
+         primary_tex_v3_y = 0.5f + pixel_pad;
+         primary_tex_v4_x = 1.0f;
+         primary_tex_v4_y = 0.5f + pixel_pad;
+         primary_tex_v5_x = 1.0f;
+         primary_tex_v5_y = 01.0;
 
          break;
    }
@@ -228,23 +267,54 @@ void setup_opengl_frame_state(void)
       screen_vertices[(4 * i) + 2] = t_x; \
       screen_vertices[(4 * i) + 3] = t_y;
 
-   const float pixel_pad = 1.0f / (192 * 2 + 2);
+
+   if (screen_layout_data.displayed_layout == ScreenLayout::HybridTop || screen_layout_data.displayed_layout == ScreenLayout::HybridBottom)
+   {
+      //Primary Screen
+      SETVERTEX(0, 0.0f, 0.0f, primary_tex_v0_x, primary_tex_v0_y); // top left
+      SETVERTEX(1, 0.0f, primary_y, primary_tex_v1_x, primary_tex_v1_y); // bottom left
+      SETVERTEX(2, primary_x, primary_y, primary_tex_v2_x, primary_tex_v2_y); // bottom right
+      SETVERTEX(3, 0.0f, 0.0f, primary_tex_v3_x, primary_tex_v3_y); // top left
+      SETVERTEX(4, primary_x, 0.0f, primary_tex_v4_x, primary_tex_v4_y); // top right
+      SETVERTEX(5, primary_x, primary_y, primary_tex_v5_x, primary_tex_v5_y); // bottom right
+
+      //Top screen
+      SETVERTEX(6, primary_x, 0.0f, 0.0f, 0.0f); // top left
+      SETVERTEX(7, primary_x, 0.0f + screen_height, 0.0f, 0.5f - pixel_pad); // bottom left
+      SETVERTEX(8, primary_x + screen_width, 0.0f + screen_height, 1.0f, 0.5f - pixel_pad); // bottom right
+      SETVERTEX(9, primary_x, 0.0f, 0.0f, 0.0f); // top left
+      SETVERTEX(10, primary_x + screen_width, 0.0f, 1.0f, 0.0f); // top right
+      SETVERTEX(11, primary_x + screen_width, 0.0f + screen_height, 1.0f, 0.5f - pixel_pad); // bottom right
+      
+      //Bottom Screen
+      SETVERTEX(12, primary_x, primary_y - screen_height, 0.0f, 0.5f + pixel_pad); // top left
+      SETVERTEX(13, primary_x, primary_y, 0.0f, 1.0f); // bottom left
+      SETVERTEX(14, primary_x + screen_width, primary_y, 1.0f, 1.0f); // bottom right
+      SETVERTEX(15, primary_x, primary_y - screen_height, 0.0f, 0.5f + pixel_pad); // top left
+      SETVERTEX(16, primary_x + screen_width, primary_y - screen_height, 1.0f, 0.5f + pixel_pad); // top right
+      SETVERTEX(17, primary_x + screen_width, primary_y,  1.0f, 1.0f); // bottom right
+   }
+   else
+   {
+      // top screen
+      SETVERTEX(0, top_screen_x, top_screen_y, 0.0f, 0.0f); // top left
+      SETVERTEX(1, top_screen_x, top_screen_y + screen_height * top_screen_scale, 0.0f, 0.5f - pixel_pad); // bottom left
+      SETVERTEX(2, top_screen_x + screen_width * top_screen_scale, top_screen_y + screen_height * top_screen_scale, 1.0f, 0.5f - pixel_pad); // bottom right
+      SETVERTEX(3, top_screen_x, top_screen_y, 0.0f, 0.0f); // top left
+      SETVERTEX(4, top_screen_x + screen_width * top_screen_scale, top_screen_y, 1.0f, 0.0f); // top right
+      SETVERTEX(5, top_screen_x + screen_width * top_screen_scale, top_screen_y + screen_height * top_screen_scale, 1.0f, 0.5f - pixel_pad); // bottom right
+
+      // bottom screen
+      SETVERTEX(6, bottom_screen_x, bottom_screen_y, 0.0f, 0.5f + pixel_pad); // top left
+      SETVERTEX(7, bottom_screen_x, bottom_screen_y + screen_height * bottom_screen_scale, 0.0f, 1.0f); // bottom left
+      SETVERTEX(8, bottom_screen_x + screen_width * bottom_screen_scale, bottom_screen_y + screen_height * bottom_screen_scale, 1.0f, 1.0f); // bottom right
+      SETVERTEX(9, bottom_screen_x, bottom_screen_y, 0.0f, 0.5f + pixel_pad); // top left
+      SETVERTEX(10, bottom_screen_x + screen_width * bottom_screen_scale, bottom_screen_y, 1.0f, 0.5f + pixel_pad); // top right
+      SETVERTEX(11, bottom_screen_x + screen_width * bottom_screen_scale, bottom_screen_y + screen_height * bottom_screen_scale, 1.0f, 1.0f); // bottom right
+   }
 
    // top screen
-   SETVERTEX(0, top_screen_x, top_screen_y, 0.0f, 0.0f); // top left
-   SETVERTEX(1, top_screen_x, top_screen_y + screen_height * top_screen_scale, 0.0f, 0.5f - pixel_pad); // bottom left
-   SETVERTEX(2, top_screen_x + screen_width * top_screen_scale, top_screen_y + screen_height * top_screen_scale, 1.0f, 0.5f - pixel_pad); // bottom right
-   SETVERTEX(3, top_screen_x, top_screen_y, 0.0f, 0.0f); // top left
-   SETVERTEX(4, top_screen_x + screen_width * top_screen_scale, top_screen_y, 1.0f, 0.0f); // top right
-   SETVERTEX(5, top_screen_x + screen_width * top_screen_scale, top_screen_y + screen_height * top_screen_scale, 1.0f, 0.5f - pixel_pad); // bottom right
 
-   // bottom screen
-   SETVERTEX(6, bottom_screen_x, bottom_screen_y, 0.0f, 0.5f - pixel_pad); // top left
-   SETVERTEX(7, bottom_screen_x, bottom_screen_y + screen_height * bottom_screen_scale, 0.0f, 1.0f); // bottom left
-   SETVERTEX(8, bottom_screen_x + screen_width * bottom_screen_scale, bottom_screen_y + screen_height * bottom_screen_scale, 1.0f, 1.0f); // bottom right
-   SETVERTEX(9, bottom_screen_x, bottom_screen_y, 0.0f, 0.5f - pixel_pad); // top left
-   SETVERTEX(10, bottom_screen_x + screen_width * bottom_screen_scale, bottom_screen_y, 1.0f, 0.5f - pixel_pad); // top right
-   SETVERTEX(11, bottom_screen_x + screen_width * bottom_screen_scale, bottom_screen_y + screen_height * bottom_screen_scale, 1.0f, 1.0f); // bottom right
 
    glBindBuffer(GL_ARRAY_BUFFER, vbo);
    glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(screen_vertices), screen_vertices);
@@ -311,7 +381,7 @@ void render_opengl_frame(bool sw)
 
    glBindBuffer(GL_ARRAY_BUFFER, vbo);
    glBindVertexArray(vao);
-   glDrawArrays(GL_TRIANGLES, 0, 4*3);
+   glDrawArrays(GL_TRIANGLES, 0, 18);
 
    glFlush();
 
