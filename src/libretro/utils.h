@@ -12,6 +12,7 @@
 #endif
 
 int32_t Clamp(int32_t value, int32_t min, int32_t max);
-void copy_screen(ScreenLayoutData *data, uint32_t* src, unsigned offset, bool primary);
+void copy_screen(ScreenLayoutData *data, uint32_t* src, unsigned offset);
+void copy_hybrid_screen(ScreenLayoutData *data, uint32_t* src, ScreenId screen_id);
 void draw_cursor(ScreenLayoutData *data, int32_t x, int32_t y);
 #endif
