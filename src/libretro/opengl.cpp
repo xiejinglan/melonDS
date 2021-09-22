@@ -279,20 +279,45 @@ void setup_opengl_frame_state(void)
       SETVERTEX(5, primary_x, primary_y, primary_tex_v5_x, primary_tex_v5_y); // bottom right
 
       //Top screen
-      SETVERTEX(6, primary_x, 0.0f, 0.0f, 0.0f); // top left
-      SETVERTEX(7, primary_x, 0.0f + screen_height, 0.0f, 0.5f - pixel_pad); // bottom left
-      SETVERTEX(8, primary_x + screen_width, 0.0f + screen_height, 1.0f, 0.5f - pixel_pad); // bottom right
-      SETVERTEX(9, primary_x, 0.0f, 0.0f, 0.0f); // top left
-      SETVERTEX(10, primary_x + screen_width, 0.0f, 1.0f, 0.0f); // top right
-      SETVERTEX(11, primary_x + screen_width, 0.0f + screen_height, 1.0f, 0.5f - pixel_pad); // bottom right
+      if(screen_layout_data.hybrid_small_screen == SmallScreenLayout::SmallScreenTop)
+      {
+         SETVERTEX(6, primary_x, 0.0f, 0.0f, 0.5f + pixel_pad); // top left
+         SETVERTEX(7, primary_x, 0.0f + screen_height, 0.0f, 1.0f); // bottom left
+         SETVERTEX(8, primary_x + screen_width, 0.0f + screen_height, 1.0f, 1.0f); // bottom right
+         SETVERTEX(9, primary_x, 0.0f, 0.0f, 0.5f + pixel_pad); // top left
+         SETVERTEX(10, primary_x + screen_width, 0.0f, 1.0f, 0.5f + pixel_pad); // top right
+         SETVERTEX(11, primary_x + screen_width, 0.0f + screen_height, 1.0f, 1.0f); // bottom right
+      }
+      else if (screen_layout_data.hybrid_small_screen == SmallScreenLayout::SmallScreenDuplicate)
+      {
+         SETVERTEX(6, primary_x, 0.0f, 0.0f, 0.0f); // top left
+         SETVERTEX(7, primary_x, 0.0f + screen_height, 0.0f, 0.5f - pixel_pad); // bottom left
+         SETVERTEX(8, primary_x + screen_width, 0.0f + screen_height, 1.0f, 0.5f - pixel_pad); // bottom right
+         SETVERTEX(9, primary_x, 0.0f, 0.0f, 0.0f); // top left
+         SETVERTEX(10, primary_x + screen_width, 0.0f, 1.0f, 0.0f); // top right
+         SETVERTEX(11, primary_x + screen_width, 0.0f + screen_height, 1.0f, 0.5f - pixel_pad); // bottom right
+      }
       
+
       //Bottom Screen
-      SETVERTEX(12, primary_x, primary_y - screen_height, 0.0f, 0.5f + pixel_pad); // top left
-      SETVERTEX(13, primary_x, primary_y, 0.0f, 1.0f); // bottom left
-      SETVERTEX(14, primary_x + screen_width, primary_y, 1.0f, 1.0f); // bottom right
-      SETVERTEX(15, primary_x, primary_y - screen_height, 0.0f, 0.5f + pixel_pad); // top left
-      SETVERTEX(16, primary_x + screen_width, primary_y - screen_height, 1.0f, 0.5f + pixel_pad); // top right
-      SETVERTEX(17, primary_x + screen_width, primary_y,  1.0f, 1.0f); // bottom right
+      if(screen_layout_data.hybrid_small_screen == SmallScreenLayout::SmallScreenBottom)
+      {
+         SETVERTEX(6, primary_x, primary_y - screen_height, 0.0f, 0.5f + pixel_pad); // top left
+         SETVERTEX(7, primary_x, primary_y, 0.0f, 1.0f); // bottom left
+         SETVERTEX(8, primary_x + screen_width, primary_y, 1.0f, 1.0f); // bottom right
+         SETVERTEX(9, primary_x, primary_y - screen_height, 0.0f, 0.5f + pixel_pad); // top left
+         SETVERTEX(10, primary_x + screen_width, primary_y - screen_height, 1.0f, 0.5f + pixel_pad); // top right
+         SETVERTEX(11, primary_x + screen_width, primary_y,  1.0f, 1.0f); // bottom right
+      }
+      else if (screen_layout_data.hybrid_small_screen == SmallScreenLayout::SmallScreenDuplicate)
+      {
+         SETVERTEX(12, primary_x, primary_y - screen_height, 0.0f, 0.5f + pixel_pad); // top left
+         SETVERTEX(13, primary_x, primary_y, 0.0f, 1.0f); // bottom left
+         SETVERTEX(14, primary_x + screen_width, primary_y, 1.0f, 1.0f); // bottom right
+         SETVERTEX(15, primary_x, primary_y - screen_height, 0.0f, 0.5f + pixel_pad); // top left
+         SETVERTEX(16, primary_x + screen_width, primary_y - screen_height, 1.0f, 0.5f + pixel_pad); // top right
+         SETVERTEX(17, primary_x + screen_width, primary_y,  1.0f, 1.0f); // bottom right
+      }
    }
    else
    {
@@ -331,8 +356,9 @@ void render_opengl_frame(bool sw)
 
    if(refresh_opengl)
    {
+      glClearColor(0,0,0,0);
+      glClear( GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT );
       setup_opengl_frame_state();
-      glClearColor(0, 0, 0, 1);
    }
 
    if(virtual_cursor)
@@ -381,7 +407,7 @@ void render_opengl_frame(bool sw)
 
    glBindBuffer(GL_ARRAY_BUFFER, vbo);
    glBindVertexArray(vao);
-   glDrawArrays(GL_TRIANGLES, 0, 18);
+   glDrawArrays(GL_TRIANGLES, 0, screen_layout_data.hybrid_small_screen == SmallScreenLayout::SmallScreenDuplicate ? 18 : 12);
 
    glFlush();
 

@@ -159,13 +159,14 @@ void retro_set_environment(retro_environment_t cb)
    {
       { "melonds_boot_directly", "Boot game directly; enabled|disabled" },
       { "melonds_screen_layout", "Screen Layout; Top/Bottom|Bottom/Top|Left/Right|Right/Left|Top Only|Bottom Only|Hybrid Top|Hybrid Bottom" },
-      { "melonds_hybrid_ratio", "Hybrid ratio; 2|3" },
+      { "melonds_hybrid_small_screen", "Hybrid small screen mode; Bottom|Top|Duplicate" },
       { "melonds_swapscreen_mode", "Swap Screen mode; Toggle|Hold" },
 #ifdef HAVE_THREADS
       { "melonds_threaded_renderer", "Threaded software renderer; disabled|enabled" },
 #endif
       { "melonds_touch_mode", "Touch mode; disabled|Mouse|Touch|Joystick" },
 #ifdef HAVE_OPENGL
+      { "melonds_hybrid_ratio", "Hybrid ratio (OpenGL only); 2|3" },
       { "melonds_opengl_renderer", "OpenGL Renderer (Restart); disabled|enabled" },
       { "melonds_opengl_resolution", opengl_resolution.c_str() },
       { "melonds_opengl_better_polygons", "OpenGL Improved polygon splitting; disabled|enabled" },
@@ -246,6 +247,10 @@ static void check_variables(bool init)
 {
    struct retro_variable var = {0};
 
+#ifdef HAVE_OPENGL
+   bool gl_update = false;
+#endif
+
    var.key = "melonds_boot_directly";
    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
    {
@@ -277,10 +282,32 @@ static void check_variables(bool init)
          layout = ScreenLayout::HybridBottom;
    }
 
+#ifdef HAVE_OPENGL
    var.key = "melonds_hybrid_ratio";
    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value != NULL)
    {
       screen_layout_data.hybrid_ratio = std::stoi(var.value);
+   }
+#else
+   screen_layout_data.hybrid_ratio = 2;
+#endif
+
+   var.key = "melonds_hybrid_small_screen";
+   if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value != NULL)
+   {
+      SmallScreenLayout old_hybrid_screen_value = screen_layout_data.hybrid_small_screen; // Copy the hybrid screen value
+      if (!strcmp(var.value, "Top"))
+         screen_layout_data.hybrid_small_screen  = SmallScreenLayout::SmallScreenTop;
+      else if (!strcmp(var.value, "Bottom"))
+         screen_layout_data.hybrid_small_screen  = SmallScreenLayout::SmallScreenBottom;
+      else
+         screen_layout_data.hybrid_small_screen  = SmallScreenLayout::SmallScreenDuplicate;
+
+   #ifdef HAVE_OPENGL
+      if(old_hybrid_screen_value != screen_layout_data.hybrid_small_screen) {
+         gl_update = true;
+      }
+   #endif
    }
 
    var.key = "melonds_swapscreen_mode";
@@ -314,8 +341,6 @@ static void check_variables(bool init)
    }
 
 #ifdef HAVE_OPENGL
-   bool gl_update = false;
-
    if(input_state.current_touch_mode != new_touch_mode) // Hide the cursor
       gl_update = true;
 
@@ -485,9 +510,20 @@ static void render_frame(void)
          unsigned primary = screen_layout_data.displayed_layout == ScreenLayout::HybridTop ? 0 : 1;
 
          copy_hybrid_screen(&screen_layout_data, GPU::Framebuffer[frontbuf][primary], ScreenId::Primary);
-         copy_hybrid_screen(&screen_layout_data, GPU::Framebuffer[frontbuf][0], ScreenId::Top);
-         copy_hybrid_screen(&screen_layout_data, GPU::Framebuffer[frontbuf][1], ScreenId::Bottom);
-         
+
+         switch(screen_layout_data.hybrid_small_screen) {
+            case SmallScreenLayout::SmallScreenTop:
+               copy_hybrid_screen(&screen_layout_data, GPU::Framebuffer[frontbuf][0], ScreenId::Bottom);
+               break;
+            case SmallScreenLayout::SmallScreenBottom:
+               copy_hybrid_screen(&screen_layout_data, GPU::Framebuffer[frontbuf][1], ScreenId::Bottom);
+               break;
+            case SmallScreenLayout::SmallScreenDuplicate:
+               copy_hybrid_screen(&screen_layout_data, GPU::Framebuffer[frontbuf][0], ScreenId::Top);
+               copy_hybrid_screen(&screen_layout_data, GPU::Framebuffer[frontbuf][1], ScreenId::Bottom);
+               break;
+         }
+
          if(cursor_enabled(&input_state))
             draw_cursor(&screen_layout_data, input_state.touch_x, input_state.touch_y);
 
@@ -560,6 +596,7 @@ void retro_run(void)
       struct retro_system_av_info updated_av_info;
       retro_get_system_av_info(&updated_av_info);
       environ_cb(RETRO_ENVIRONMENT_SET_SYSTEM_AV_INFO, &updated_av_info);
+      clean_screenlayout_buffer(&screen_layout_data);
    }
 }
 

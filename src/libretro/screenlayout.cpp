@@ -211,3 +211,11 @@ void update_screenlayout(ScreenLayout layout, ScreenLayoutData *data, bool openg
         }
     }
 }
+
+void clean_screenlayout_buffer(ScreenLayoutData *data)
+{
+    if(data->buffer_ptr == NULL) return;
+
+    unsigned size = data->buffer_stride * data->buffer_height;
+    memset(data->buffer_ptr, 0, size);
+}
