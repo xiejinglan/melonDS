@@ -149,7 +149,7 @@ private:
     u8 IRCmd;
 };
 
-// CartRetailBT - Pokémon Typing Adventure (SPI BT controller)
+// CartRetailBT - PokÃ©mon Typing Adventure (SPI BT controller)
 class CartRetailBT : public CartRetail
 {
 public:

@@ -1,4 +1,4 @@
-MELONDS_VERSION = "0.9.1"
+MELONDS_VERSION = "0.9.3"
 
 DEFINES += -DMELONDS_VERSION=\"$(MELONDS_VERSION)\"
 
@@ -21,7 +21,12 @@ SOURCES_C  += $(CORE_DIR)/libretro-common/compat/compat_strl.c \
               $(CORE_DIR)/libretro-common/streams/file_stream_transforms.c \
               $(CORE_DIR)/libretro-common/streams/memory_stream.c \
               $(CORE_DIR)/libretro-common/string/stdstring.c \
-              $(CORE_DIR)/libretro-common/vfs/vfs_implementation.c
+              $(CORE_DIR)/libretro-common/vfs/vfs_implementation.c \
+              $(MELON_DIR)/fatfs/diskio.c \
+              $(MELON_DIR)/fatfs/ff.c \
+              $(MELON_DIR)/fatfs/ffsystem.c \
+              $(MELON_DIR)/fatfs/ffunicode.c \
+              $(MELON_DIR)/sha1/sha1.c
 endif
 
 SOURCES_CXX := $(MELON_DIR)/NDS.cpp \
@@ -37,7 +42,9 @@ SOURCES_CXX := $(MELON_DIR)/NDS.cpp \
                     $(MELON_DIR)/DSi.cpp \
                     $(MELON_DIR)/DSi_AES.cpp \
                     $(MELON_DIR)/DSi_Camera.cpp \
+                    $(MELON_DIR)/DSi_DSP.cpp \
                     $(MELON_DIR)/DSi_I2C.cpp \
+                    $(MELON_DIR)/DSi_NAND.cpp \
                     $(MELON_DIR)/DSi_NDMA.cpp \
                     $(MELON_DIR)/DSi_NWifi.cpp \
                     $(MELON_DIR)/DSi_SD.cpp \
@@ -63,6 +70,22 @@ SOURCES_CXX := $(MELON_DIR)/NDS.cpp \
                     $(CORE_DIR)/platform.cpp \
                     $(CORE_DIR)/screenlayout.cpp \
                     $(CORE_DIR)/utils.cpp
+
+# Teakra
+SOURCES_CXX += $(MELON_DIR)/teakra/src/ahbm.cpp \
+                $(MELON_DIR)/teakra/src/apbp.cpp \
+                $(MELON_DIR)/teakra/src/btdmp.cpp \
+                $(MELON_DIR)/teakra/src/disassembler_c.cpp \
+                $(MELON_DIR)/teakra/src/disassembler.cpp \
+                $(MELON_DIR)/teakra/src/dma.cpp \
+                $(MELON_DIR)/teakra/src/memory_interface.cpp \
+                $(MELON_DIR)/teakra/src/mmio.cpp \
+                $(MELON_DIR)/teakra/src/parser.cpp \
+                $(MELON_DIR)/teakra/src/processor.cpp \
+                $(MELON_DIR)/teakra/src/teakra_c.cpp \
+                $(MELON_DIR)/teakra/src/teakra.cpp \
+                $(MELON_DIR)/teakra/src/timer.cpp
+INCFLAGS    += -I$(MELON_DIR)/teakra/include -I$(MELON_DIR)/teakra/src
 
 ifeq ($(HAVE_OPENGL), 1)
 SOURCES_C += $(CORE_DIR)/libretro-common/glsm/glsm.c \

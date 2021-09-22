@@ -177,6 +177,7 @@ void retro_set_environment(retro_environment_t cb)
       { "melonds_jit_branch_optimisations", "JIT Branch optimisations; enabled|disabled" },
       { "melonds_jit_literal_optimisations", "JIT Literal optimisations; enabled|disabled" },
       { "melonds_jit_fast_memory", "JIT Fast memory; enabled|disabled" },
+      { "melonds_audio_bitrate", "Audio bitrate; Automatic|10-bit|16-bit" },
 #endif
       { 0, 0 }
    };
@@ -416,6 +417,17 @@ static void check_variables(bool init)
          Config::JIT_FastMemory = false;
    }
 #endif
+
+   var.key = "melonds_audio_bitrate";
+   if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
+   {
+      if (!strcmp(var.value, "10-bit"))
+         Config::AudioBitrate = 1;
+      else if (!strcmp(var.value, "16-bit"))
+         Config::AudioBitrate = 2;
+      else
+         Config::AudioBitrate = 0;
+   }
 
    input_state.current_touch_mode = new_touch_mode;
 

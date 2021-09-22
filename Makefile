@@ -468,7 +468,7 @@ include Makefile.common
 
 OBJECTS := $(SOURCES_C:.c=.o) $(SOURCES_CXX:.cpp=.o) $(SOURCES_S:.S=.o)
 
-CXXFLAGS += -std=gnu++14
+CXXFLAGS += -std=c++17
 
 CFLAGS   += -Wall -D__LIBRETRO__ $(INCFLAGS) $(DEFINES) $(INCFLAGS_PLATFORM)
 CXXFLAGS += -Wall -D__LIBRETRO__ $(INCFLAGS) $(DEFINES) $(INCFLAGS_PLATFORM)

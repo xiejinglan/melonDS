@@ -34,7 +34,7 @@
 #include <streams/file_stream_transforms.h>
 #endif
 
-namespace NDSCart_SRAM
+namespace NDSCart
 {
 
 // SRAM TODO: emulate write delays???
