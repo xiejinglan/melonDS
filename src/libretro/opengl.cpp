@@ -279,7 +279,7 @@ void setup_opengl_frame_state(void)
       SETVERTEX(5, primary_x, primary_y, primary_tex_v5_x, primary_tex_v5_y); // bottom right
 
       //Top screen
-      if(screen_layout_data.hybrid_small_screen == SmallScreenLayout::SmallScreenTop)
+      if(screen_layout_data.hybrid_small_screen == SmallScreenLayout::SmallScreenTop && screen_layout_data.displayed_layout == ScreenLayout::HybridTop)
       {
          SETVERTEX(6, primary_x, 0.0f, 0.0f, 0.5f + pixel_pad); // top left
          SETVERTEX(7, primary_x, 0.0f + screen_height, 0.0f, 1.0f); // bottom left
@@ -288,7 +288,8 @@ void setup_opengl_frame_state(void)
          SETVERTEX(10, primary_x + screen_width, 0.0f, 1.0f, 0.5f + pixel_pad); // top right
          SETVERTEX(11, primary_x + screen_width, 0.0f + screen_height, 1.0f, 1.0f); // bottom right
       }
-      else if (screen_layout_data.hybrid_small_screen == SmallScreenLayout::SmallScreenDuplicate)
+      else if (screen_layout_data.hybrid_small_screen == SmallScreenLayout::SmallScreenDuplicate
+         || (screen_layout_data.displayed_layout == ScreenLayout::HybridBottom && screen_layout_data.hybrid_small_screen == SmallScreenLayout::SmallScreenTop))
       {
          SETVERTEX(6, primary_x, 0.0f, 0.0f, 0.0f); // top left
          SETVERTEX(7, primary_x, 0.0f + screen_height, 0.0f, 0.5f - pixel_pad); // bottom left
@@ -300,7 +301,7 @@ void setup_opengl_frame_state(void)
       
 
       //Bottom Screen
-      if(screen_layout_data.hybrid_small_screen == SmallScreenLayout::SmallScreenBottom)
+      if(screen_layout_data.hybrid_small_screen == SmallScreenLayout::SmallScreenBottom && screen_layout_data.displayed_layout == ScreenLayout::HybridTop)
       {
          SETVERTEX(6, primary_x, primary_y - screen_height, 0.0f, 0.5f + pixel_pad); // top left
          SETVERTEX(7, primary_x, primary_y, 0.0f, 1.0f); // bottom left
@@ -308,6 +309,15 @@ void setup_opengl_frame_state(void)
          SETVERTEX(9, primary_x, primary_y - screen_height, 0.0f, 0.5f + pixel_pad); // top left
          SETVERTEX(10, primary_x + screen_width, primary_y - screen_height, 1.0f, 0.5f + pixel_pad); // top right
          SETVERTEX(11, primary_x + screen_width, primary_y,  1.0f, 1.0f); // bottom right
+      }
+      else if(screen_layout_data.hybrid_small_screen == SmallScreenLayout::SmallScreenBottom && screen_layout_data.displayed_layout == ScreenLayout::HybridBottom)
+      {
+         SETVERTEX(6, primary_x, primary_y - screen_height, 0.0f, 0.0f); // top left
+         SETVERTEX(7, primary_x, primary_y, 0.0f, 0.5f - pixel_pad); // bottom left
+         SETVERTEX(8, primary_x + screen_width, primary_y, 1.0f, 0.5f - pixel_pad); // bottom right
+         SETVERTEX(9, primary_x, primary_y - screen_height, 0.0f, 0.0f); // top left
+         SETVERTEX(10, primary_x + screen_width, primary_y - screen_height, 1.0f, 0.0f); // top right
+         SETVERTEX(11, primary_x + screen_width, primary_y, 1.0f, 0.5f - pixel_pad); // bottom right
       }
       else if (screen_layout_data.hybrid_small_screen == SmallScreenLayout::SmallScreenDuplicate)
       {
