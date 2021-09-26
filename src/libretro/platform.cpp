@@ -24,6 +24,10 @@
 #include "libui_sdl/LAN_Socket.h"
 #endif
 
+#ifdef HAVE_LIBNX
+#include <switch/services/bsd.h>
+#endif
+
 #ifndef HAVE_WIFI
 #define SO_REUSEADDR 0
 #define SO_BROADCAST 0
