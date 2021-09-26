@@ -16,7 +16,11 @@
     with melonDS. If not, see http://www.gnu.org/licenses/.
 */
 
+#ifndef __MINGW32__
 #include <stdio.h>
+#else
+#include <wchar.h>
+#endif
 
 #include "DSi.h"
 #include "DSi_AES.h"
