@@ -10,6 +10,7 @@
 #include "Config.h"
 #include "Platform.h"
 #include "NDS.h"
+#include "NDSCart_SRAMManager.h"
 #include "GPU.h"
 #include "SPU.h"
 #include "version.h"
@@ -79,10 +80,7 @@ void retro_init(void)
    initialize_screnlayout_data(&screen_layout_data);
 }
 
-void retro_deinit(void)
-{
-   return;
-}
+void retro_deinit(void) {}
 
 unsigned retro_api_version(void)
 {
@@ -598,6 +596,8 @@ void retro_run(void)
       environ_cb(RETRO_ENVIRONMENT_SET_SYSTEM_AV_INFO, &updated_av_info);
       clean_screenlayout_buffer(&screen_layout_data);
    }
+
+   NDSCart_SRAMManager::Flush();
 }
 
 bool retro_load_game(const struct retro_game_info *info)

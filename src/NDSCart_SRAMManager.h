@@ -34,6 +34,9 @@ namespace NDSCart_SRAMManager
     bool NeedsFlush();
     void FlushSecondaryBuffer(u8* dst = NULL, s32 dstLength = 0);
     void UpdateBuffer(u8* src, s32 srcLength);
+#ifdef __LIBRETRO__
+    void Flush();
+#endif
 }
 
 #endif // NDSCART_SRAMMANAGER_H

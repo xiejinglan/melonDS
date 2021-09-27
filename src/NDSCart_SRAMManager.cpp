@@ -20,15 +20,13 @@
 #include <string.h>
 #include <unistd.h>
 #include <time.h>
-#include <atomic>
 #include "NDSCart_SRAMManager.h"
 #include "Platform.h"
 
 namespace NDSCart_SRAMManager
 {
-
 Platform::Thread* FlushThread;
-std::atomic_bool FlushThreadRunning;
+bool FlushThreadRunning;
 Platform::Mutex* SecondaryBufferLock;
 
 char Path[1024];
@@ -50,13 +48,16 @@ void FlushThreadFunc();
 
 bool Init()
 {
+#ifndef __LIBRETRO__
     SecondaryBufferLock = Platform::Mutex_Create();
+#endif
 
     return true;
 }
 
 void DeInit()
 {
+#ifndef __LIBRETRO__
     if (FlushThreadRunning)
     {
         FlushThreadRunning = false;
@@ -64,8 +65,9 @@ void DeInit()
         Platform::Thread_Free(FlushThread);
         FlushSecondaryBuffer();
     }
+#endif
 
-    if (SecondaryBuffer) delete[] SecondaryBuffer;
+    if (SecondaryBuffer) delete SecondaryBuffer;
     SecondaryBuffer = NULL;
 
     Platform::Mutex_Free(SecondaryBufferLock);
@@ -76,7 +78,9 @@ void Setup(const char* path, u8* buffer, u32 length)
     // Flush SRAM in case there is unflushed data from previous state.
     FlushSecondaryBuffer();
 
+#ifndef __LIBRETRO__
     Platform::Mutex_Lock(SecondaryBufferLock);
+#endif
 
     strncpy(Path, path, 1023);
     Path[1023] = '\0';
@@ -84,7 +88,7 @@ void Setup(const char* path, u8* buffer, u32 length)
     Buffer = buffer;
     Length = length;
 
-    if(SecondaryBuffer) delete[] SecondaryBuffer; // Delete secondary buffer, there might be previous state.
+    if(SecondaryBuffer) delete SecondaryBuffer; // Delete secondary buffer, there might be previous state.
 
     SecondaryBuffer = new u8[length];
     SecondaryBufferLength = length;
@@ -93,31 +97,32 @@ void Setup(const char* path, u8* buffer, u32 length)
     PreviousFlushVersion = 0;
     TimeAtLastFlushRequest = 0;
 
+#ifndef __LIBRETRO__
     Platform::Mutex_Unlock(SecondaryBufferLock);
 
-    if (path[0] != '\0' && !FlushThreadRunning)
+    if (path[0] != '\0')
     {
         FlushThread = Platform::Thread_Create(FlushThreadFunc);
         FlushThreadRunning = true;
     }
-    else if (path[0] == '\0' && FlushThreadRunning)
-    {
-        FlushThreadRunning = false;
-        Platform::Thread_Wait(FlushThread);
-        Platform::Thread_Free(FlushThread);
-    }
+#endif
 }
 
 void RequestFlush()
 {
+#ifndef __LIBRETRO__
     Platform::Mutex_Lock(SecondaryBufferLock);
+#endif
     printf("NDS SRAM: Flush requested\n");
     memcpy(SecondaryBuffer, Buffer, Length);
     FlushVersion++;
     TimeAtLastFlushRequest = time(NULL);
+#ifndef __LIBRETRO__
     Platform::Mutex_Unlock(SecondaryBufferLock);
+#endif
 }
 
+#ifndef __LIBRETRO__
 void FlushThreadFunc()
 {
     for (;;)
@@ -125,7 +130,7 @@ void FlushThreadFunc()
         Platform::Sleep(100 * 1000); // 100ms
 
         if (!FlushThreadRunning) return;
-        
+
         // We debounce for two seconds after last flush request to ensure that writing has finished.
         if (TimeAtLastFlushRequest == 0 || difftime(time(NULL), TimeAtLastFlushRequest) < 2)
         {
@@ -135,6 +140,15 @@ void FlushThreadFunc()
         FlushSecondaryBuffer();
     }
 }
+#else
+void Flush()
+{
+    if (TimeAtLastFlushRequest != 0 && difftime(time(NULL), TimeAtLastFlushRequest) > 2)
+    {
+        FlushSecondaryBuffer();
+    }
+}
+#endif
 
 void FlushSecondaryBuffer(u8* dst, s32 dstLength)
 {
@@ -143,7 +157,9 @@ void FlushSecondaryBuffer(u8* dst, s32 dstLength)
     // When flushing to memory, we don't know if dst already has any data so we only check that we CAN flush.
     if (dst && dstLength < SecondaryBufferLength) return;
 
+#ifndef __LIBRETRO__
     Platform::Mutex_Lock(SecondaryBufferLock);
+#endif
     if (dst)
     {
         memcpy(dst, SecondaryBuffer, SecondaryBufferLength);
@@ -160,7 +176,9 @@ void FlushSecondaryBuffer(u8* dst, s32 dstLength)
     }
     PreviousFlushVersion = FlushVersion;
     TimeAtLastFlushRequest = 0;
+#ifndef __LIBRETRO__
     Platform::Mutex_Unlock(SecondaryBufferLock);
+#endif
 }
 
 bool NeedsFlush()
@@ -180,5 +198,4 @@ void UpdateBuffer(u8* src, s32 srcLength)
 
     PreviousFlushVersion = FlushVersion;
 }
-
 }
