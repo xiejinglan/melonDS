@@ -14,6 +14,7 @@
 #include "GPU.h"
 #include "SPU.h"
 #include "version.h"
+#include "frontend/FrontendUtil.h"
 
 #include "input.h"
 #include "opengl.h"
@@ -54,8 +55,6 @@ enum CurrentRenderer
 };
 
 static CurrentRenderer current_renderer = CurrentRenderer::None;
-
-bool direct_boot = true;
 
 static void fallback_log(enum retro_log_level level, const char *fmt, ...)
 {
@@ -155,6 +154,7 @@ void retro_set_environment(retro_environment_t cb)
 
   static const retro_variable values[] =
    {
+      { "melonds_console_mode", "Console Mode; DS|DSi" },
       { "melonds_boot_directly", "Boot game directly; enabled|disabled" },
       { "melonds_screen_layout", "Screen Layout; Top/Bottom|Bottom/Top|Left/Right|Right/Left|Top Only|Bottom Only|Hybrid Top|Hybrid Bottom" },
       { "melonds_hybrid_small_screen", "Hybrid small screen mode; Bottom|Top|Duplicate" },
@@ -177,6 +177,7 @@ void retro_set_environment(retro_environment_t cb)
       { "melonds_jit_literal_optimisations", "JIT Literal optimisations; enabled|disabled" },
       { "melonds_jit_fast_memory", "JIT Fast memory; enabled|disabled" },
 #endif
+      { "melonds_dsi_sdcard", "Enable DSi SD card; disabled|enabled" },
       { "melonds_audio_bitrate", "Audio bitrate; Automatic|10-bit|16-bit" },
       { "melonds_audio_interpolation", "Audio Interpolation; None|Linear|Cosine|Cubic" },
       { 0, 0 }
@@ -239,7 +240,7 @@ void retro_set_controller_port_device(unsigned port, unsigned device)
 void retro_reset(void)
 {
    NDS::Reset();
-   NDS::LoadROM(rom_path.c_str(), save_path.c_str(), direct_boot);
+   NDS::LoadROM(rom_path.c_str(), save_path.c_str(), Config::DirectBoot);
 }
 
 static void check_variables(bool init)
@@ -250,13 +251,22 @@ static void check_variables(bool init)
    bool gl_update = false;
 #endif
 
+   var.key = "melonds_console_mode";
+   if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
+   {
+      if (!strcmp(var.value, "DSi"))
+         Config::ConsoleType = 1;
+      else
+         Config::ConsoleType = 0;
+   }
+
    var.key = "melonds_boot_directly";
    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
    {
       if (!strcmp(var.value, "disabled"))
-         direct_boot = false;
+         Config::DirectBoot = 0;
       else
-         direct_boot = true;
+         Config::DirectBoot = 1;
    }
 
    ScreenLayout layout = ScreenLayout::TopBottom;
@@ -441,6 +451,15 @@ static void check_variables(bool init)
          Config::JIT_FastMemory = false;
    }
 #endif
+
+   var.key = "melonds_dsi_sdcard";
+   if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
+   {
+      if (!strcmp(var.value, "enabled"))
+         Config::DSiSDEnable = 1;
+      else
+         Config::DSiSDEnable = 0;
+   }
 
    var.key = "melonds_audio_bitrate";
    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
@@ -650,6 +669,11 @@ bool retro_load_game(const struct retro_game_info *info)
    strcpy(Config::BIOS7Path, "bios7.bin");
    strcpy(Config::BIOS9Path, "bios9.bin");
    strcpy(Config::FirmwarePath, "firmware.bin");
+   strcpy(Config::DSiBIOS7Path, "dsi_bios7.bin");
+   strcpy(Config::DSiBIOS9Path, "dsi_bios9.bin");
+   strcpy(Config::DSiFirmwarePath, "dsi_firmware.bin");
+   strcpy(Config::DSiNANDPath, "dsi_nand.bin");
+   strcpy(Config::DSiSDPath, "dsi_sd_card.bin");
    strcpy(Config::FirmwareUsername, "MelonDS");
 
    struct retro_input_descriptor desc[] = {
@@ -735,8 +759,9 @@ bool retro_load_game(const struct retro_game_info *info)
    GPU::InitRenderer(false);
    GPU::SetRenderSettings(false, video_settings);
    SPU::SetInterpolation(Config::AudioInterp);
-   NDS::SetConsoleType(0);
-   NDS::LoadROM(rom_path.c_str(), save_path.c_str(), direct_boot);
+   NDS::SetConsoleType(Config::ConsoleType);
+   Frontend::LoadBIOS();
+   NDS::LoadROM(rom_path.c_str(), save_path.c_str(), Config::DirectBoot);
 
    (void)info;
 
@@ -762,35 +787,60 @@ bool retro_load_game_special(unsigned type, const struct retro_game_info *info, 
 
 size_t retro_serialize_size(void)
 {
-   // Create the dummy savestate
-   void* data = malloc(MAX_SERIALIZE_TEST_SIZE);
-   Savestate* savestate = new Savestate(data, MAX_SERIALIZE_TEST_SIZE, true);
-   NDS::DoSavestate(savestate);
-   // Find the offset to find the current static filesize
-   size_t size = savestate->GetOffset();
-   // Free
-   delete savestate;
-   free(data);
+   if (NDS::ConsoleType == 0)
+   {
+      // Create the dummy savestate
+      void* data = malloc(MAX_SERIALIZE_TEST_SIZE);
+      Savestate* savestate = new Savestate(data, MAX_SERIALIZE_TEST_SIZE, true);
+      NDS::DoSavestate(savestate);
+      // Find the offset to find the current static filesize
+      size_t size = savestate->GetOffset();
+      // Free
+      delete savestate;
+      free(data);
 
-   return size;
+      return size;
+   }
+   else
+   {
+      log_cb(RETRO_LOG_WARN, "Savestates unsupported in DSi mode.\n");
+      return 0;
+   }
+
 }
 
 bool retro_serialize(void *data, size_t size)
 {
-   Savestate* savestate = new Savestate(data, size, true);
-   NDS::DoSavestate(savestate);
-   delete savestate;
+   if (NDS::ConsoleType == 0)
+   {
+      Savestate* savestate = new Savestate(data, size, true);
+      NDS::DoSavestate(savestate);
+      delete savestate;
 
-   return true;
+      return true;
+   }
+   else
+   {
+      log_cb(RETRO_LOG_WARN, "Savestates unsupported in DSi mode.\n");
+      return false;
+   }
 }
 
 bool retro_unserialize(const void *data, size_t size)
 {
-   Savestate* savestate = new Savestate((void*)data, size, false);
-   NDS::DoSavestate(savestate);
-   delete savestate;
+   if (NDS::ConsoleType == 0)
+   {
+      Savestate* savestate = new Savestate((void*)data, size, false);
+      NDS::DoSavestate(savestate);
+      delete savestate;
 
-   return true;
+      return true;
+   }
+   else
+   {
+      log_cb(RETRO_LOG_WARN, "Savestates unsupported in DSi mode.\n");
+      return false;
+   }
 }
 
 void *retro_get_memory_data(unsigned type)
