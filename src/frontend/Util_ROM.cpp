@@ -19,6 +19,10 @@
 #include <stdio.h>
 #include <string.h>
 
+#ifdef HAVE_LIBNX
+#include <strings.h>
+#endif
+
 #include <utility>
 
 #ifdef ARCHIVE_SUPPORT_ENABLED
