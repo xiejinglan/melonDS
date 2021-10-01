@@ -37,6 +37,7 @@ void update_screenlayout(ScreenLayout layout, ScreenLayoutData *data, bool openg
 
     data->screen_width = VIDEO_WIDTH * scale;
     data->screen_height = VIDEO_HEIGHT * scale;
+    data->screen_gap = data->screen_gap_unscaled * scale;
 
     current_screen_layout = layout;
 
@@ -79,14 +80,14 @@ void update_screenlayout(ScreenLayout layout, ScreenLayoutData *data, bool openg
             data->direct_copy = true;
 
             data->buffer_width = data->screen_width;
-            data->buffer_height = data->screen_height * 2;
+            data->buffer_height = data->screen_height * 2 + data->screen_gap;
             data->buffer_stride = data->screen_width * pixel_size;
 
             data->touch_offset_x = 0;
-            data->touch_offset_y = data->screen_height;
+            data->touch_offset_y = data->screen_height + data->screen_gap;
 
             data->top_screen_offset = 0;
-            data->bottom_screen_offset = data->buffer_width * data->screen_height;
+            data->bottom_screen_offset = data->buffer_width * (data->screen_height + data->screen_gap);
 
             break;
         case ScreenLayout::BottomTop:
@@ -95,13 +96,13 @@ void update_screenlayout(ScreenLayout layout, ScreenLayoutData *data, bool openg
             data->direct_copy = true;
 
             data->buffer_width = data->screen_width;
-            data->buffer_height = data->screen_height * 2;
+            data->buffer_height = data->screen_height * 2 + data->screen_gap;
             data->buffer_stride = data->screen_width * pixel_size;
 
             data->touch_offset_x = 0;
             data->touch_offset_y = 0;
 
-            data->top_screen_offset = data->buffer_width * data->screen_height;
+            data->top_screen_offset = data->buffer_width * (data->screen_height + data->screen_gap);
             data->bottom_screen_offset = 0;
 
             break;
