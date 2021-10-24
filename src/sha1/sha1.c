@@ -33,6 +33,9 @@ A million repetitions of "a"
 #if (BSD >= 199103)
 # include <machine/endian.h>
 #else
+#if defined (__HAIKU__)
+# include <posix/endian.h>
+#else
 #if defined(linux) || defined(__linux__)
 # include <endian.h>
 #else
@@ -57,6 +60,7 @@ A million repetitions of "a"
 #define BYTE_ORDER	BIG_ENDIAN
 #endif
 #endif /* linux */
+#endif /* HAIKU */
 #endif /* BSD */
 #endif /* BYTE_ORDER */
 

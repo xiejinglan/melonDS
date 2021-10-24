@@ -56,10 +56,6 @@ TARGET_NAME := melonds
 LIBS		    = -lm
 DEFINES :=
 
-ifneq ($(findstring Haiku,$(shell uname -s)),)
-LIBS += -lnetwork
-endif
-
 # GIT HASH
 GIT_VERSION := " $(shell git rev-parse --short HEAD || echo unknown)"
 ifneq ($(GIT_VERSION)," unknown")
@@ -76,7 +72,11 @@ ifeq ($(platform), unix)
    fpic := -fPIC
    SHARED := -shared -Wl,--version-script=$(CORE_DIR)/link.T -Wl,--no-undefined
    CFLAGS += -D_GNU_SOURCE
-   LIBS += -lpthread -lrt
+   ifneq ($(findstring Haiku,$(shell uname -s)),)
+      LIBS += -lpthread -lroot -lnetwork
+   else
+      LIBS += -lpthread -lrt
+   endif
    HAVE_THREADS=1
    ifneq ($(filter $(ARCH),x86 x86_64),)
      LIBS += -lGL
