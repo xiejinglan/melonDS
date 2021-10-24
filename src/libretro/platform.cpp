@@ -19,6 +19,10 @@
 #define pcap_dev_name name
 #endif
 
+#if defined(__HAIKU__)
+#include <sys/select.h>
+#endif
+
 #ifdef HAVE_PCAP
 #include "libui_sdl/LAN_PCap.h"
 #include "libui_sdl/LAN_Socket.h"

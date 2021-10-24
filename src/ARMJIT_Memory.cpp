@@ -91,6 +91,8 @@ bool FaultHandler(FaultDescription& faultDesc);
             #define CONTEXT_PC uc_mcontext->__ss.__rip
         #elif defined(__FreeBSD__)
             #define CONTEXT_PC uc_mcontext.mc_rip
+        #elif defined(__HAIKU__)
+            #define CONTEXT_PC uc_mcontext.rip
         #elif defined(__NetBSD__)
             #define CONTEXT_PC uc_mcontext.__gregs[_REG_RIP]
         #endif
