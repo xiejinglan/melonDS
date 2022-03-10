@@ -1,5 +1,5 @@
 /*
-    Copyright 2016-2021 Arisotura
+    Copyright 2016-2022 melonDS team
 
     This file is part of melonDS.
 
@@ -19,7 +19,6 @@
 #include <stdio.h>
 #include <string.h>
 #include <inttypes.h>
-#include "Config.h"
 #include "NDS.h"
 #include "ARM.h"
 #include "NDSCart.h"
@@ -33,7 +32,6 @@
 #include "Wifi.h"
 #include "AREngine.h"
 #include "Platform.h"
-#include "NDSCart_SRAMManager.h"
 #include "FreeBIOS.h"
 
 #ifdef JIT_ENABLED
@@ -43,6 +41,9 @@
 
 #include "DSi.h"
 #include "DSi_SPI_TSC.h"
+#include "DSi_NWifi.h"
+#include "DSi_Camera.h"
+#include "DSi_DSP.h"
 
 
 namespace NDS
@@ -80,6 +81,10 @@ u32 ARM7Regions[0x20000];
 ARMv5* ARM9;
 ARMv4* ARM7;
 
+#ifdef JIT_ENABLED
+bool EnableJIT;
+#endif
+
 u32 NumFrames;
 u32 NumLagFrames;
 bool LagFrameFlag;
@@ -89,6 +94,7 @@ u64 FrameStartTimestamp;
 int CurCPU;
 
 const s32 kMaxIterationCycles = 64;
+const s32 kIterationCycleMargin = 8;
 
 u32 ARM9ClockShift;
 
@@ -196,7 +202,6 @@ bool Init()
     DMAs[6] = new DMA(1, 2);
     DMAs[7] = new DMA(1, 3);
 
-    if (!NDSCart_SRAMManager::Init()) return false;
     if (!NDSCart::Init()) return false;
     if (!GBACart::Init()) return false;
     if (!GPU::Init()) return false;
@@ -224,7 +229,6 @@ void DeInit()
     for (int i = 0; i < 8; i++)
         delete DMAs[i];
 
-    NDSCart_SRAMManager::DeInit();
     NDSCart::DeInit();
     GBACart::DeInit();
     GPU::DeInit();
@@ -349,7 +353,28 @@ void InitTimings()
     // handled later: GBA slot, wifi
 }
 
-void SetupDirectBoot()
+bool NeedsDirectBoot()
+{
+    if (ConsoleType == 1)
+    {
+        // for now, DSi mode requires original BIOS/NAND
+        return false;
+    }
+    else
+    {
+        // internal BIOS does not support direct boot
+        if (!Platform::GetConfigBool(Platform::ExternalBIOSEnable))
+            return true;
+
+        // DSi/3DS firmwares aren't bootable
+        if (SPI_Firmware::GetFirmwareLength() == 0x20000)
+            return true;
+
+        return false;
+    }
+}
+
+void SetupDirectBoot(std::string romname)
 {
     if (ConsoleType == 1)
     {
@@ -413,11 +438,34 @@ void SetupDirectBoot()
         ARM7BIOSProt = 0x1204;
 
         SPI_Firmware::SetupDirectBoot(false);
+
+        ARM9->CP15Write(0x100, 0x00012078);
+        ARM9->CP15Write(0x200, 0x00000042);
+        ARM9->CP15Write(0x201, 0x00000042);
+        ARM9->CP15Write(0x300, 0x00000002);
+        ARM9->CP15Write(0x502, 0x15111011);
+        ARM9->CP15Write(0x503, 0x05100011);
+        ARM9->CP15Write(0x600, 0x04000033);
+        ARM9->CP15Write(0x601, 0x04000033);
+        ARM9->CP15Write(0x610, 0x0200002B);
+        ARM9->CP15Write(0x611, 0x0200002B);
+        ARM9->CP15Write(0x620, 0x00000000);
+        ARM9->CP15Write(0x621, 0x00000000);
+        ARM9->CP15Write(0x630, 0x08000035);
+        ARM9->CP15Write(0x631, 0x08000035);
+        ARM9->CP15Write(0x640, 0x0300001B);
+        ARM9->CP15Write(0x641, 0x0300001B);
+        ARM9->CP15Write(0x650, 0x00000000);
+        ARM9->CP15Write(0x651, 0x00000000);
+        ARM9->CP15Write(0x660, 0xFFFF001D);
+        ARM9->CP15Write(0x661, 0xFFFF001D);
+        ARM9->CP15Write(0x670, 0x027FF017);
+        ARM9->CP15Write(0x671, 0x027FF017);
+        ARM9->CP15Write(0x910, 0x0300000A);
+        ARM9->CP15Write(0x911, 0x00000020);
     }
 
-    ARM9->CP15Write(0x910, 0x0300000A);
-    ARM9->CP15Write(0x911, 0x00000020);
-    ARM9->CP15Write(0x100, ARM9->CP15Read(0x100) | 0x00050000);
+    NDSCart::SetupDirectBoot(romname);
 
     ARM9->R[12] = NDSCart::Header.ARM9EntryAddress;
     ARM9->R[13] = 0x03002F7C;
@@ -455,6 +503,10 @@ void Reset()
     FILE* f;
     u32 i;
 
+#ifdef JIT_ENABLED
+    EnableJIT = Platform::GetConfigBool(Platform::JIT_Enable);
+#endif
+
     RunningGame = false;
     LastSysClockCycles = 0;
 
@@ -464,34 +516,46 @@ void Reset()
     // DS BIOSes are always loaded, even in DSi mode
     // we need them for DS-compatible mode
 
-    f = Platform::OpenLocalFile(Config::BIOS9Path, "rb");
-    if (!f)
+    if (Platform::GetConfigBool(Platform::ExternalBIOSEnable))
     {
-        printf("ARM9 BIOS not found. Loading FreeBIOS.\n");
+        f = Platform::OpenLocalFile(Platform::GetConfigString(Platform::BIOS9Path), "rb");
+        if (!f)
+        {
+            printf("ARM9 BIOS not found\n");
+
+            for (i = 0; i < 16; i++)
+                ((u32*)ARM9BIOS)[i] = 0xE7FFDEFF;
+        }
+        else
+        {
+            fseek(f, 0, SEEK_SET);
+            fread(ARM9BIOS, 0x1000, 1, f);
+
+            printf("ARM9 BIOS loaded\n");
+            fclose(f);
+        }
+
+        f = Platform::OpenLocalFile(Platform::GetConfigString(Platform::BIOS7Path), "rb");
+        if (!f)
+        {
+            printf("ARM7 BIOS not found\n");
+
+            for (i = 0; i < 16; i++)
+                ((u32*)ARM7BIOS)[i] = 0xE7FFDEFF;
+        }
+        else
+        {
+            fseek(f, 0, SEEK_SET);
+            fread(ARM7BIOS, 0x4000, 1, f);
+
+            printf("ARM7 BIOS loaded\n");
+            fclose(f);
+        }
+    }
+    else
+    {
         memcpy(ARM9BIOS, bios_arm9_bin, bios_arm9_bin_len);
-    }
-    else
-    {
-        fseek(f, 0, SEEK_SET);
-        fread(ARM9BIOS, 0x1000, 1, f);
-
-        printf("ARM9 BIOS loaded\n");
-        fclose(f);
-    }
-
-    f = Platform::OpenLocalFile(Config::BIOS7Path, "rb");
-    if (!f)
-    {
-        printf("ARM7 BIOS not found. Loading FreeBIOS.\n");
         memcpy(ARM7BIOS, bios_arm7_bin, bios_arm7_bin_len);
-    }
-    else
-    {
-        fseek(f, 0, SEEK_SET);
-        fread(ARM7BIOS, 0x4000, 1, f);
-
-        printf("ARM7 BIOS loaded\n");
-        fclose(f);
     }
 
 #ifdef JIT_ENABLED
@@ -501,7 +565,6 @@ void Reset()
     if (ConsoleType == 1)
     {
         DSi::LoadBIOS();
-        DSi::LoadNAND();
 
         ARM9ClockShift = 2;
         MainRAMMask = 0xFFFFFF;
@@ -592,6 +655,8 @@ void Reset()
     RTC::Reset();
     Wifi::Reset();
 
+    // TODO: move the SOUNDBIAS/degrade logic to SPU?
+
     // The SOUNDBIAS register does nothing on DSi
     SPU::SetApplyBias(ConsoleType == 0);
 
@@ -604,14 +669,20 @@ void Reset()
         degradeAudio = false;
     }
 
-    if (Config::AudioBitrate == 1) // Always 10-bit
+    int bitrate = Platform::GetConfigInt(Platform::AudioBitrate);
+    if (bitrate == 1) // Always 10-bit
         degradeAudio = true;
-    else if (Config::AudioBitrate == 2) // Always 16-bit
+    else if (bitrate == 2) // Always 16-bit
         degradeAudio = false;
 
     SPU::SetDegrade10Bit(degradeAudio);
 
     AREngine::Reset();
+}
+
+void Start()
+{
+    Running = true;
 }
 
 void Stop()
@@ -648,7 +719,14 @@ bool DoSavestate_Scheduler(Savestate* file)
         DivDone,
         SqrtDone,
 
-        NULL
+        DSi_SDHost::FinishRX,
+        DSi_SDHost::FinishTX,
+        DSi_NWifi::MSTimer,
+        DSi_Camera::IRQ,
+        DSi_Camera::Transfer,
+        DSi_DSP::DSPCatchUpU32,
+
+        nullptr
     };
 
     int len = Event_MAX;
@@ -658,7 +736,7 @@ bool DoSavestate_Scheduler(Savestate* file)
         {
             SchedEvent* evt = &SchedList[i];
 
-            u32 funcid = -1;
+            u32 funcid = 0xFFFFFFFF;
             if (evt->Func)
             {
                 for (int j = 0; eventfuncs[j]; j++)
@@ -705,7 +783,7 @@ bool DoSavestate_Scheduler(Savestate* file)
                 evt->Func = eventfuncs[funcid];
             }
             else
-                evt->Func = NULL;
+                evt->Func = nullptr;
 
             file->Var64(&evt->Timestamp);
             file->Var32(&evt->Param);
@@ -719,14 +797,25 @@ bool DoSavestate(Savestate* file)
 {
     file->Section("NDSG");
 
-    // TODO:
-    // * do something for bool's (sizeof=1)
-    // * do something for 'loading DSi-mode savestate in DS mode' and vice-versa
-    // * add IE2/IF2 there
+    if (file->Saving)
+    {
+        u32 console = ConsoleType;
+        file->Var32(&console);
+    }
+    else
+    {
+        u32 console;
+        file->Var32(&console);
+        if (console != ConsoleType)
+            return false;
+    }
 
-    file->VarArray(MainRAM, 0x400000);
-    file->VarArray(SharedWRAM, 0x8000);
+    file->VarArray(MainRAM, MainRAMMaxSize);
+    file->VarArray(SharedWRAM, SharedWRAMSize);
     file->VarArray(ARM7WRAM, ARM7WRAMSize);
+
+    //file->VarArray(ARM9BIOS, 0x1000);
+    //file->VarArray(ARM7BIOS, 0x4000);
 
     file->VarArray(ExMemCnt, 2*sizeof(u16));
     file->VarArray(ROMSeed0, 2*8);
@@ -737,6 +826,8 @@ bool DoSavestate(Savestate* file)
     file->VarArray(IME, 2*sizeof(u32));
     file->VarArray(IE, 2*sizeof(u32));
     file->VarArray(IF, 2*sizeof(u32));
+    file->Var32(&IE2);
+    file->Var32(&IF2);
 
     file->Var8(&PostFlag9);
     file->Var8(&PostFlag7);
@@ -781,11 +872,8 @@ bool DoSavestate(Savestate* file)
     file->Var64(&LastSysClockCycles);
     file->Var64(&FrameStartTimestamp);
     file->Var32(&NumFrames);
-    if (file->IsAtleastVersion(7, 1))
-    {
-        file->Var32(&NumLagFrames);
-        file->Bool32(&LagFrameFlag);
-    }
+    file->Var32(&NumLagFrames);
+    file->Bool32(&LagFrameFlag);
 
     // TODO: save KeyInput????
     file->Var16(&KeyCnt);
@@ -816,12 +904,16 @@ bool DoSavestate(Savestate* file)
     ARM7->DoSavestate(file);
 
     NDSCart::DoSavestate(file);
-    GBACart::DoSavestate(file);
+    if (ConsoleType == 0)
+        GBACart::DoSavestate(file);
     GPU::DoSavestate(file);
     SPU::DoSavestate(file);
     SPI::DoSavestate(file);
     RTC::DoSavestate(file);
     Wifi::DoSavestate(file);
+
+    if (ConsoleType == 1)
+        DSi::DoSavestate(file);
 
     if (!file->Saving)
     {
@@ -844,77 +936,63 @@ void SetConsoleType(int type)
     ConsoleType = type;
 }
 
-bool LoadROM(const u8* romdata, u32 filelength, const char *sram, bool direct)
+bool LoadCart(const u8* romdata, u32 romlen, const u8* savedata, u32 savelen)
 {
-    if (NDSCart::LoadROM(romdata, filelength, sram, direct))
-    {
-        Running = true;
-        return true;
-    }
-    else
-    {
-        printf("Failed to load ROM from archive\n");
+    if (!NDSCart::LoadROM(romdata, romlen))
         return false;
-    }
+
+    if (savedata && savelen)
+        NDSCart::LoadSave(savedata, savelen);
+
+    return true;
 }
 
-bool LoadROM(const char* path, const char* sram, bool direct)
+void LoadSave(const u8* savedata, u32 savelen)
 {
-    if (NDSCart::LoadROM(path, sram, direct))
-    {
-        Running = true;
-        return true;
-    }
-    else
-    {
-        printf("Failed to load ROM %s\n", path);
-        return false;
-    }
+    if (savedata && savelen)
+        NDSCart::LoadSave(savedata, savelen);
 }
 
-bool LoadGBAROM(const char* path, const char* sram)
+void EjectCart()
 {
-    if (GBACart::LoadROM(path, sram))
-    {
-        return true;
-    }
-    else
-    {
-        printf("Failed to load ROM %s\n", path);
-        return false;
-    }
+    NDSCart::EjectCart();
 }
 
-bool LoadGBAROM(const u8* romdata, u32 filelength, const char *filename, const char *sram)
+bool CartInserted()
 {
-    if (GBACart::LoadROM(romdata, filelength, sram))
-    {
-        return true;
-    }
-    else
-    {
-        printf("Failed to load ROM %s from archive\n", filename);
+    return NDSCart::CartInserted;
+}
+
+bool LoadGBACart(const u8* romdata, u32 romlen, const u8* savedata, u32 savelen)
+{
+    if (!GBACart::LoadROM(romdata, romlen))
         return false;
-    }
+
+    if (savedata && savelen)
+        GBACart::LoadSave(savedata, savelen);
+
+    return true;
+}
+
+void LoadGBAAddon(int type)
+{
+    GBACart::LoadAddon(type);
+}
+
+void EjectGBACart()
+{
+    GBACart::EjectCart();
 }
 
 void LoadBIOS()
 {
     Reset();
-    Running = true;
 }
-
-void RelocateSave(const char* path, bool write)
-{
-    printf("SRAM: relocating to %s (write=%s)\n", path, write?"true":"false");
-    NDSCart::RelocateSave(path, write);
-}
-
 
 
 u64 NextTarget()
 {
-    u64 ret = SysTimestamp + kMaxIterationCycles;
+    u64 minEvent = UINT64_MAX;
 
     u32 mask = SchedListMask;
     for (int i = 0; i < Event_MAX; i++)
@@ -922,14 +1000,19 @@ u64 NextTarget()
         if (!mask) break;
         if (mask & 0x1)
         {
-            if (SchedList[i].Timestamp < ret)
-                ret = SchedList[i].Timestamp;
+            if (SchedList[i].Timestamp < minEvent)
+                minEvent = SchedList[i].Timestamp;
         }
 
         mask >>= 1;
     }
 
-    return ret;
+    u64 max = SysTimestamp + kMaxIterationCycles;
+
+    if (minEvent < max + kIterationCycleMargin)
+        return minEvent;
+
+    return max;
 }
 
 void RunSystem(u64 timestamp)
@@ -966,7 +1049,6 @@ u32 RunFrame()
 
         while (Running && GPU::TotalScanlines==0)
         {
-            // TODO: give it some margin, so it can directly do 17 cycles instead of 16 then 1
             u64 target = NextTarget();
             ARM9Target = target << ARM9ClockShift;
             CurCPU = 0;
@@ -1046,8 +1128,6 @@ u32 RunFrame()
             GPU3D::Timestamp-SysTimestamp);
 #endif
         SPU::TransferOutput();
-
-        NDSCart::FlushSRAMFile();
     }
 
     // In the context of TASes, frame count is traditionally the primary measure of emulated time,
@@ -1065,7 +1145,7 @@ u32 RunFrame()
 u32 RunFrame()
 {
 #ifdef JIT_ENABLED
-    if (Config::JIT_Enable)
+    if (EnableJIT)
         return NDS::ConsoleType == 1
             ? RunFrame<true, 1>()
             : RunFrame<true, 0>();
@@ -1186,10 +1266,10 @@ void MicInputFrame(s16* data, int samples)
     return SPI_TSC::MicInputFrame(data, samples);
 }
 
-int ImportSRAM(u8* data, u32 length)
+/*int ImportSRAM(u8* data, u32 length)
 {
     return NDSCart::ImportSRAM(data, length);
-}
+}*/
 
 
 void Halt()
@@ -2468,7 +2548,7 @@ u32 ARM7Read32(u32 addr)
               (GBACart::SRAMRead(addr+3) << 24);
     }
 
-    printf("unknown arm7 read32 %08X | %08X\n", addr, ARM7->R[15]);
+    //printf("unknown arm7 read32 %08X | %08X\n", addr, ARM7->R[15]);
     return 0;
 }
 

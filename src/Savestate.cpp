@@ -1,5 +1,5 @@
 /*
-    Copyright 2016-2021 Arisotura
+    Copyright 2016-2022 melonDS team
 
     This file is part of melonDS.
 
@@ -77,7 +77,7 @@ Savestate::Savestate(const char* filename, bool save)
         file = Platform::OpenFile(filename, "wb");
         if (!file)
         {
-            printf("savestate: file %s doesn't exist\n", filename);
+            printf("savestate: file %s doesn't exist\n", filename.c_str());
             Error = true;
             return;
         }
@@ -107,7 +107,7 @@ Savestate::Savestate(const char* filename, bool save)
         file = Platform::OpenFile(filename, "rb");
         if (!file)
         {
-            printf("savestate: file %s doesn't exist\n", filename);
+            printf("savestate: file %s doesn't exist\n", filename.c_str());
             Error = true;
             return;
         }
